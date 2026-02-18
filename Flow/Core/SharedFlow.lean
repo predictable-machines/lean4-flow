@@ -1,5 +1,6 @@
 import PredictableFlow.Core.Collector
 import PredictableFlow.Core.Flow
+import PredictableFlow.Core.Flows
 import PredictableCore.Shared.Uuid
 import Std
 
@@ -26,14 +27,14 @@ multiple concurrent subscribers receiving the same emissions.
 // Kotlin
 val sharedFlow = MutableSharedFlow<Int>(replay = 2)
 sharedFlow.emit(1)
-val job = sharedFlow.collect { println(it) }
+val job = sharedFlow.subscribe { println(it) }
 ```
 
 ```lean
 -- Lean
 let sharedFlow ← MutableSharedFlow.create (replay := 2)
 sharedFlow.emit 1
-let cancel ← sharedFlow.collect IO.println
+let cancel ← sharedFlow.subscribe IO.println
 ```
 
 ## Concurrency
@@ -158,7 +159,7 @@ namespace SharedFlow
 
 /-- Unsubscribe a subscriber by their ID.
 
-    This is typically called via the cancellation function returned by `collect`,
+    This is typically called via the cancellation function returned by `subscribe`,
     but can also be called directly if you have the subscriber ID.
     Cancels any pending work for the subscriber before removing it.
 -/
@@ -178,7 +179,7 @@ def addSubscriber
     (action : α → IO Unit)
     (skipReplay : Bool := false)
     : IO (SharedFlowState α × IO Unit) := do
-  if state.isClosed then throw (IO.userError "Cannot collect from closed SharedFlow")
+  if state.isClosed then throw (IO.userError "Cannot subscribe to closed SharedFlow")
   let subscriberId ← Core.Uuid.v4
   let subscriber ← Subscriber.create subscriberId action state.bufferSize state.onBufferOverflow
   unless skipReplay do
@@ -189,22 +190,21 @@ def addSubscriber
     closeActions := state.closeActions.push subscriber.close }
   pure (newState, flow.unsubscribe subscriberId)
 
-/-- Collect emissions from a SharedFlow. Returns a cancellation function.
+/-- Subscribe to emissions from a SharedFlow. Returns a cancellation function.
 
-    This is the main way to consume a SharedFlow, matching Kotlin's `collect`
-    semantics. The action is called for each emission until you invoke the
-    returned cancellation function.
+    This is the main way to consume a SharedFlow. The action is called for
+    each emission until you invoke the returned cancellation function.
 
     Example:
     ```lean
     let flow ← MutableSharedFlow.create (α := Nat)
-    let cancel ← flow.collect IO.println
+    let cancel ← flow.subscribe IO.println
     flow.emit 1  -- prints "1"
     flow.emit 2  -- prints "2"
-    cancel       -- stop collecting
+    cancel       -- stop subscribing
     ```
 -/
-def collect (flow : SharedFlow α) (action : α → IO Unit) : IO (IO Unit) :=
+def subscribe (flow : SharedFlow α) (action : α → IO Unit) : IO (IO Unit) :=
   flow.state.atomically do
     let state ← get
     let (newState, cancel) ← addSubscriber flow state action
@@ -272,16 +272,16 @@ def create
   let state ← Std.Mutex.new initialState
   pure { state, parentFlush }
 
-/-- Emit a value to all current collectors.
+/-- Emit a value to all current subscribers.
 
-    Sends the value to each collector's channel for processing.
+    Sends the value to each subscriber's channel for processing.
 
     Example:
     ```lean
     let flow ← MutableSharedFlow.create (α := String)
-    let cancel1 ← flow.collect IO.println
-    let cancel2 ← flow.collect (fun s => IO.println s!"Sub2: {s}")
-    flow.emit "Hello"  -- both collectors receive "Hello"
+    let cancel1 ← flow.subscribe IO.println
+    let cancel2 ← flow.subscribe (fun s => IO.println s!"Sub2: {s}")
+    flow.emit "Hello"  -- both subscribers receive "Hello"
     ```
 -/
 def emit (flow : MutableSharedFlow α) (value : α) : IO Unit :=
@@ -312,34 +312,6 @@ def close (flow : MutableSharedFlow α) : IO Unit := do
     pure state.closeActions
   for action in actions do
     action
-
-def map (flow : MutableSharedFlow α) (f : α → β) : IO (MutableSharedFlow β) := do
-  flow.state.atomically do
-    let state ← get
-    let mapped ← MutableSharedFlow.create
-      (α := β)
-      (replay := state.replay)
-      (bufferSize := state.bufferSize)
-      (onBufferOverflow := state.onBufferOverflow)
-      (parentFlush := flow.toSharedFlow.flush)
-
-    let (stateWithSub, _) ← SharedFlow.addSubscriber flow.toSharedFlow state (fun a => mapped.emit (f a))
-    set { stateWithSub with closeActions := stateWithSub.closeActions.push mapped.close }
-    pure mapped
-
-def filter (flow : MutableSharedFlow α) (pred : α → Bool) : IO (MutableSharedFlow α) := do
-  flow.state.atomically do
-    let state ← get
-    let filtered ← MutableSharedFlow.create
-      (α := α)
-      (replay := state.replay)
-      (bufferSize := state.bufferSize)
-      (onBufferOverflow := state.onBufferOverflow)
-      (parentFlush := flow.toSharedFlow.flush)
-
-    let (stateWithSub, _) ← SharedFlow.addSubscriber flow.toSharedFlow state (fun a => if pred a then filtered.emit a else pure ())
-    set { stateWithSub with closeActions := stateWithSub.closeActions.push filtered.close }
-    pure filtered
 
 def choose (flow : SharedFlow α) (f : α → Option β) : IO (MutableSharedFlow β) := do
   flow.state.atomically do
@@ -381,48 +353,6 @@ end MutableSharedFlow
 
 namespace SharedFlow
 
-/-- Transform each emitted value with a function.
-
-    Creates a new SharedFlow that subscribes to the original and emits
-    transformed values. The mapped flow inherits the original's replay
-    and buffer settings.
-
-    Example:
-    ```lean
-    let flow ← MutableSharedFlow.create (α := Nat) (replay := 1)
-    let doubled ← flow.toSharedFlow.map (· * 2)
-    let cancel ← doubled.collect IO.println
-    flow.emit 5  -- prints "10"
-    ```
--/
-def map (flow : SharedFlow α) (f : α → β) : IO (SharedFlow β) := do
-  flow.state.atomically do
-    let state ← get
-    let mapped ← MutableSharedFlow.create
-      (α := β)
-      (replay := state.replay)
-      (bufferSize := state.bufferSize)
-      (onBufferOverflow := state.onBufferOverflow)
-      (parentFlush := flow.flush)
-
-    let (stateWithSub, _) ← addSubscriber flow state (fun a => mapped.emit (f a))
-    set { stateWithSub with closeActions := stateWithSub.closeActions.push mapped.close }
-    pure mapped.toSharedFlow
-
-def filter (flow : SharedFlow α) (pred : α → Bool) : IO (SharedFlow α) := do
-    flow.state.atomically do
-    let state ← get
-    let filtered ← MutableSharedFlow.create
-      (α := α)
-      (replay := state.replay)
-      (bufferSize := state.bufferSize)
-      (onBufferOverflow := state.onBufferOverflow)
-      (parentFlush := flow.flush)
-
-    let (stateWithSub, _) ← addSubscriber flow state (fun a => if pred a then filtered.emit a else pure ())
-    set { stateWithSub with closeActions := stateWithSub.closeActions.push filtered.close }
-    pure filtered.toSharedFlow
-
 def combine (flow1 : SharedFlow α) (flow2 : SharedFlow β) : IO (SharedFlow (Sum α β)) := do
   flow1.state.atomically do
     let state1 ← get
@@ -443,29 +373,54 @@ def combine (flow1 : SharedFlow α) (flow2 : SharedFlow β) : IO (SharedFlow (Su
 
 end SharedFlow
 
-/-- SharedFlow instance of Flows typeclass -/
-instance : Flows SharedFlow where
-  collect := SharedFlow.collect
-  map := SharedFlow.map
-  flush := SharedFlow.flush
-  filter := SharedFlow.filter
+instance : DerivedFlow SharedFlow where
+  derive source handler :=
+    source.state.atomically do
+      let state ← get
+      let derived ← MutableSharedFlow.create
+        (replay := state.replay)
+        (bufferSize := state.bufferSize)
+        (onBufferOverflow := state.onBufferOverflow)
+        (parentFlush := source.flush)
+      let (s, _) ← SharedFlow.addSubscriber source state (handler derived.emit)
+      set { s with closeActions := s.closeActions.push derived.close }
+      pure derived.toSharedFlow
+
+instance : DerivedFlow MutableSharedFlow where
+  derive source handler :=
+    source.state.atomically do
+      let state ← get
+      let derived ← MutableSharedFlow.create
+        (replay := state.replay)
+        (bufferSize := state.bufferSize)
+        (onBufferOverflow := state.onBufferOverflow)
+        (parentFlush := source.toSharedFlow.flush)
+      let (s, _) ← SharedFlow.addSubscriber source.toSharedFlow state (handler derived.emit)
+      set { s with closeActions := s.closeActions.push derived.close }
+      pure derived
+
+instance : Flows SharedFlow IO Id where
   combine := SharedFlow.combine
+  subscribe := SharedFlow.subscribe
+  flush := SharedFlow.flush
+  toList := fun flow => do
+    let list ← IO.mkRef ([] : List _)
+    -- `Id` is @[reducible] so Lean reduces `a : Id α` to `α` in the callback,
+    -- but the list ref keeps type `List (Id α)` from the return type, causing an
+    -- HAppend mismatch. Annotating `a : Id _` preserves the wrapper so both sides match.
+    let _ ← SharedFlow.subscribe flow fun (a : Id _) => list.modify (a :: ·)
+    SharedFlow.flush flow
+    (← list.get).reverse |> pure
 
-instance : Flows MutableSharedFlow where
-  collect := (SharedFlow.collect ·.toSharedFlow)
-  map := MutableSharedFlow.map
-  flush := (SharedFlow.flush ·.toSharedFlow)
-  filter := MutableSharedFlow.filter
+instance : Flows MutableSharedFlow IO Id where
   combine := MutableSharedFlow.combine
-
-/-- SharedFlow instance of Chooses typeclass -/
-instance : Chooses SharedFlow where
-  choose := fun flow f => do
-    let mutable ← (MutableSharedFlow.choose flow f)
-    pure mutable.toSharedFlow
-
-/-- MutableSharedFlow instance of Chooses typeclass -/
-instance : Chooses MutableSharedFlow where
-  choose := (MutableSharedFlow.choose ·.toSharedFlow)
+  subscribe := (SharedFlow.subscribe ·.toSharedFlow)
+  flush := (SharedFlow.flush ·.toSharedFlow)
+  toList := fun flow => do
+    let list ← IO.mkRef ([] : List _)
+    -- See SharedFlow instance above for why `Id _` annotation is needed.
+    let _ ← SharedFlow.subscribe flow.toSharedFlow fun (a : Id _) => list.modify (a :: ·)
+    SharedFlow.flush flow.toSharedFlow
+    (← list.get).reverse |> pure
 
 end Flow.Core

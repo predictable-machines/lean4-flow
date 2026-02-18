@@ -7,7 +7,7 @@ open Flow.Core
 namespace PredictableProgram
 
 structure ReactiveProgramHandler (α ε : Type) where
-  writeFlow : MutableSharedFlow (ReactiveMessage α ε)
+  writeFlow : MutableProgramFlow (ReactiveError ε) (ReactiveMessage α ε)
   finishingPromise : IO.Promise Unit
 
 def isExit : ReactiveMessage α ε → Bool
@@ -21,38 +21,53 @@ def init
   let config ← PredictableProgram.ask
   let programState ← PredictableProgram.get
   let (stateFlow : MutableStateFlow σ) ← MutableStateFlow.create definition.initialState
-  let _ ← stateFlow.collect fun s => do
-    let _ ← PredictableProgram.run (definition.onUpdated s) config programState
-    return ()
-  let (writeFlow : MutableSharedFlow (ReactiveMessage α ε)) ← MutableSharedFlow.create (replay := 10)
+  let writeFlow ← MutableProgramFlow.create
+    config
+    (initialState := programState)
+    (replay := 10)
 
   let finishingPromise ← IO.Promise.new (α := Unit)
 
-  let processMessage (msg : ReactiveMessage α ε) : IO Unit := do
-    if isExit msg then
-      finishingPromise.resolve ()
-      stateFlow.close
-      writeFlow.close
-      return ()
-    let state ← stateFlow.value
+  let processMessage
+      (exceptMsg : Except (ReactiveError ε)
+      (ReactiveMessage α ε))
+      : PredictableProgram (ReactiveError ε) Unit := do
+    match exceptMsg with
+    | .error _ => pure ()
+    | .ok msg =>
+      if isExit msg then
+        finishingPromise.resolve ()
+        stateFlow.close
+        writeFlow.close
+        return ()
+      match ← (stateFlow.value : IO (Option σ)) with
+      | none => pure ()
+      | some state =>
+      let newState := definition.update state msg
+      (stateFlow.emit newState : IO Unit)
+      let _ ←
+        IO.asTask do
+          match ← Flows.withStateSync
+            writeFlow.stateMutex
+            writeFlow.config
+            (definition.sideEffect newState msg writeFlow.emit)
+          with
+          | .ok () => pure ()
+          | .error err => writeFlow.emit (.error err)
 
-    let newState := definition.update state msg
-    stateFlow.emit newState
-    let _ ←
-      IO.asTask do
-        match ← PredictableProgram.run
-          (definition.sideEffect newState msg writeFlow.emit) config programState with
-        | (.error err, _) => writeFlow.emit (.error err)
-        | _ => pure ()
+      pure ()
 
-  let processUpdate (state : σ) : IO Unit := do
-      let (result, _)  ← PredictableProgram.run (definition.onUpdated state) config programState
-      match result with
-      | .error err => writeFlow.emit (.error err)
-      | _ => pure ()
+  let processState (state : σ) : IO Unit := do
+    match ← Flows.withStateSync
+      writeFlow.stateMutex
+      writeFlow.config
+      (definition.onUpdated state)
+    with
+    | .ok () => pure ()
+    | .error err => writeFlow.emit (.error err)
 
-  let _ ← stateFlow.collect processUpdate
-  let _ ← writeFlow.collect processMessage
+  let _ ← stateFlow.subscribe processState
+  let _ ← writeFlow.subscribe processMessage
 
   pure { writeFlow, finishingPromise }
 

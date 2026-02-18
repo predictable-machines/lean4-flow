@@ -1,4 +1,5 @@
 import PredictableFlow.Core.SharedFlow
+import PredictableFlow.Core.Flows
 
 namespace Flow.Core
 
@@ -30,7 +31,7 @@ stateFlow.collect { println(it) }
 let stateFlow ← MutableStateFlow.create 0
 let v ← stateFlow.value  -- 0
 stateFlow.emit 42
-let cancel ← stateFlow.collect IO.println
+let cancel ← stateFlow.subscribe IO.println
 ```
 
 ## Key Properties
@@ -48,8 +49,8 @@ let cancel ← stateFlow.collect IO.println
 -/
 structure StateFlow (α : Type) where
   sharedFlow : SharedFlow α
-  initialState : α
-  value : IO α
+  initialState : Option α
+  value : IO (Option α)
 
 namespace StateFlow
 
@@ -67,50 +68,37 @@ def flush (flow : StateFlow α) : IO Unit :=
   flow.sharedFlow.flush
 
 
-/-- Transform each emitted value with a function.
-
-    Creates a new StateFlow that applies the transformation to values.
-
-    Example:
-    ```lean
-    let state ← MutableStateFlow.create 5
-    let doubled ← state.toStateFlow.map (· * 2)
-    let v ← doubled.value  -- 10
-    ```
--/
-def map (flow : StateFlow α) (f : α → β) : IO (StateFlow β) := do
-  let mappedShared ← flow.sharedFlow.map f
-  pure {
-    sharedFlow := mappedShared
-    initialState := f flow.initialState
-    value := f <$> flow.value
-  }
-
-def filter (flow : StateFlow α) (pred : α → Bool) : IO (StateFlow α) := do
-  let filteredShared ← flow.sharedFlow.filter pred
-  pure {
-    sharedFlow := filteredShared
-    initialState := flow.initialState
-    value := flow.value
-  }
-
 def combine (flow1 : StateFlow α) (flow2 : StateFlow β) : IO (StateFlow (Sum α β)) := do
   let combinedShared ← flow1.sharedFlow.combine flow2.sharedFlow
-  pure {
-    sharedFlow := combinedShared
-    initialState := Sum.inl flow1.initialState
-    value := Sum.inl <$> flow1.value
-  }
+  pure
+    { sharedFlow := combinedShared
+      initialState := flow1.initialState.map Sum.inl
+      value := (·.map Sum.inl) <$> flow1.value }
 
 end StateFlow
 
-/-- StateFlow instance of Flows typeclass -/
-instance : Flows StateFlow where
-  collect := (·.sharedFlow.collect)
-  map := StateFlow.map
-  flush := StateFlow.flush
-  filter := StateFlow.filter
+instance : DerivedFlow StateFlow where
+  derive flow handler := do
+    let derivedShared ← DerivedFlow.derive flow.sharedFlow handler
+    pure
+      { sharedFlow := derivedShared,
+        initialState := none,
+        value := do
+          let cache ← derivedShared.replayCache
+          pure cache[cache.size - 1]? }
+
+instance : Flows StateFlow IO Id where
   combine := StateFlow.combine
+  subscribe := (·.sharedFlow.subscribe)
+  flush := StateFlow.flush
+  toList := fun flow => do
+    let list ← IO.mkRef ([] : List _)
+    -- `Id` is @[reducible] so Lean reduces `a : Id α` to `α` in the callback,
+    -- but the list ref keeps type `List (Id α)` from the return type, causing an
+    -- HAppend mismatch. Annotating `a : Id _` preserves the wrapper so both sides match.
+    let _ ← flow.sharedFlow.subscribe fun (a : Id _) => list.modify (a :: ·)
+    StateFlow.flush flow
+    (← list.get).reverse |> pure
 
 /-- Mutable StateFlow that can update its value.
 
@@ -118,21 +106,26 @@ instance : Flows StateFlow where
 -/
 structure MutableStateFlow (α : Type) where
   mutableSharedFlow : MutableSharedFlow α
-  initialState : α
-  value : IO α
+  initialState : Option α
+  value : IO (Option α)
 
 namespace MutableStateFlow
 
-/-- Create a new MutableStateFlow with an initial value.
+/-- Create a new MutableStateFlow, optionally with an initial value.
+
+    When `initial` is `some v`, the flow starts with value `v` and subscribers
+    receive it immediately. When `none`, the flow starts empty and `value`
+    returns `none` until the first emission.
 
     Example:
     ```lean
     let flow ← MutableStateFlow.create 0
     let stringFlow ← MutableStateFlow.create "hello"
+    let empty ← MutableStateFlow.create (α := Nat)
     ```
 -/
 def create
-    (initialState : α)
+    (initial : Option α := none)
     (parentFlush : Option (IO Unit) := none)
     : IO (MutableStateFlow α) := do
   let mutableSharedFlow ←
@@ -144,17 +137,18 @@ def create
 
   let value := do
     let cache ← mutableSharedFlow.toSharedFlow.replayCache
-    pure (cache.getD (cache.size - 1) initialState)
+    pure cache[cache.size - 1]?
 
-  mutableSharedFlow.emit initialState
-  pure { mutableSharedFlow, initialState, value }
+  if let some v := initial then
+    mutableSharedFlow.emit v
+  pure { mutableSharedFlow, initialState := initial, value }
 
-/-- Update the value and notify all collectors.
+/-- Update the value and notify all subscribers.
 
     Example:
     ```lean
     let flow ← MutableStateFlow.create 0
-    let cancel ← flow.collect IO.println
+    let cancel ← flow.subscribe IO.println
     flow.emit 42  -- prints "42"
     ```
 -/
@@ -171,9 +165,9 @@ def emit (flow : MutableStateFlow α) (newValue : α) : IO Unit := do
     ```
 -/
 def update (flow : MutableStateFlow α) (f : α → α) : IO Unit := do
-  let currentValue ← flow.value
-  let newValue := f currentValue
-  flow.emit newValue
+  match ← flow.value with
+  | some currentValue => flow.emit (f currentValue)
+  | none => pure ()
 
 /-- Update the value using an IO transformation function.
 
@@ -184,9 +178,11 @@ def update (flow : MutableStateFlow α) (f : α → α) : IO Unit := do
     ```
 -/
 def updateIO (flow : MutableStateFlow α) (f : α → IO α) : IO Unit := do
-  let currentValue ← flow.value
-  let newValue ← f currentValue
-  flow.emit newValue
+  match ← flow.value with
+  | some currentValue =>
+    let newValue ← f currentValue
+    flow.emit newValue
+  | none => pure ()
 
 /-- Close the flow, cancelling all subscribers and preventing new emissions and subscriptions. -/
 def close (flow : MutableStateFlow α) : IO Unit :=
@@ -203,12 +199,14 @@ def close (flow : MutableStateFlow α) : IO Unit :=
     ```
 -/
 def compareAndSet [BEq α] (flow : MutableStateFlow α) (expected : α) (newValue : α) : IO Bool := do
-  let current ← flow.value
-  if current == expected then
-    flow.emit newValue
-    pure true
-  else
-    pure false
+  match ← flow.value with
+  | some current =>
+    if current == expected then
+      flow.emit newValue
+      pure true
+    else
+      pure false
+  | none => pure false
 
 /-- Get the number of active subscribers -/
 def subscriberCount (flow : MutableStateFlow α) : IO Nat :=
@@ -234,42 +232,20 @@ def flush (flow : MutableStateFlow α) : IO Unit :=
     Example:
     ```lean
     let state ← MutableStateFlow.create 0
-    let cancel ← state.collect IO.println
+    let cancel ← state.subscribe IO.println
     state.emit 42  -- subscriber receives 42
     cancel  -- stop receiving updates
     ```
 -/
-def collect (flow : MutableStateFlow α) (action : α → IO Unit) : IO (IO Unit) :=
-  flow.mutableSharedFlow.collect action
-
-/-- Transform each emitted value with a function.
-
-    Creates a new MutableStateFlow that applies the transformation.
-    The mapped flow subscribes to the original and emits transformed values.
-
-    Note: Emitting to the mapped flow does not affect the original flow.
-
-    Example:
-    ```lean
-    let state ← MutableStateFlow.create 5
-    let doubled ← state.map (· * 2)
-    let v ← doubled.value  -- 10
-    ```
--/
-def map (flow : MutableStateFlow α) (f : α → β) : IO (MutableStateFlow β) := do
-  flow.mutableSharedFlow.state.atomically do
-    let state ← get
-    let initialValue := state.replayCache.getD (state.replayCache.size - 1) flow.initialState
-    let mapped ← MutableStateFlow.create (f initialValue) (parentFlush := flow.flush)
-    let (stateWithSub, _) ← SharedFlow.addSubscriber flow.mutableSharedFlow.toSharedFlow state (fun a => mapped.emit <| f a) (skipReplay := true)
-    set { stateWithSub with closeActions := stateWithSub.closeActions.push mapped.close }
-    pure mapped
+def subscribe (flow : MutableStateFlow α) (action : α → IO Unit) : IO (IO Unit) :=
+  flow.mutableSharedFlow.subscribe action
 
 def filter (flow : MutableStateFlow α) (pred : α → Bool) : IO (MutableStateFlow α) := do
   flow.mutableSharedFlow.state.atomically do
     let state ← get
-    let initialValue := state.replayCache.getD (state.replayCache.size - 1) flow.initialState
-    let filtered ← MutableStateFlow.create initialValue (parentFlush := flow.flush)
+    let currentValue := state.replayCache[state.replayCache.size - 1]? <|> flow.initialState
+    let filteredInitial := currentValue.filter pred
+    let filtered ← MutableStateFlow.create filteredInitial (parentFlush := flow.flush)
     let (stateWithSub, _) ← SharedFlow.addSubscriber flow.mutableSharedFlow.toSharedFlow state (fun a => if pred a then filtered.emit a else pure ()) (skipReplay := true)
     set { stateWithSub with closeActions := stateWithSub.closeActions.push filtered.close }
     pure filtered
@@ -277,10 +253,10 @@ def filter (flow : MutableStateFlow α) (pred : α → Bool) : IO (MutableStateF
 def combine (flow1 : MutableStateFlow α) (flow2 : MutableStateFlow β) : IO (MutableStateFlow (α ⊕ β)) := do
   flow1.mutableSharedFlow.state.atomically do
     let state1 ← get
-    let initialValue := state1.replayCache.getD (state1.replayCache.size - 1) flow1.initialState
+    let initialValue := (state1.replayCache[state1.replayCache.size - 1]? <|> flow1.initialState).map Sum.inl
     let (combined, state1') ← flow2.mutableSharedFlow.state.atomically do
       let state2 ← get
-      let combined ← MutableStateFlow.create (Sum.inl initialValue) (parentFlush := some (do flow1.flush; flow2.flush))
+      let combined ← MutableStateFlow.create initialValue (parentFlush := some (do flow1.flush; flow2.flush))
       let (state1', _) ← SharedFlow.addSubscriber flow1.mutableSharedFlow.toSharedFlow state1 (fun a => combined.emit (Sum.inl a)) (skipReplay := true)
       let (state2', _) ← SharedFlow.addSubscriber flow2.mutableSharedFlow.toSharedFlow state2 (fun b => combined.emit (Sum.inr b)) (skipReplay := true)
       set { state2' with closeActions := state2'.closeActions.push combined.close }
@@ -290,12 +266,33 @@ def combine (flow1 : MutableStateFlow α) (flow2 : MutableStateFlow β) : IO (Mu
 
 end MutableStateFlow
 
-/-- MutableStateFlow instance of Flows typeclass -/
-instance : Flows MutableStateFlow where
-  collect := (·.mutableSharedFlow.collect)
-  map := MutableStateFlow.map
-  flush := (·.mutableSharedFlow.flush)
+instance : DerivedFlow MutableStateFlow where
+  derive flow handler := do
+    flow.mutableSharedFlow.state.atomically do
+      let state ← get
+      let derivedInitial ← do
+        match state.replayCache[state.replayCache.size - 1]? <|> flow.initialState with
+        | some currentValue =>
+          let ref ← IO.mkRef none
+          handler (fun b => ref.set (some b)) currentValue
+          ref.get
+        | none => pure none
+      let derived ← MutableStateFlow.create derivedInitial (parentFlush := flow.flush)
+      let (s, _) ← SharedFlow.addSubscriber flow.mutableSharedFlow.toSharedFlow state
+        (handler derived.emit) (skipReplay := true)
+      set { s with closeActions := s.closeActions.push derived.close }
+      pure derived
+
+instance : Flows MutableStateFlow IO Id where
   filter := MutableStateFlow.filter
   combine := MutableStateFlow.combine
+  subscribe := (·.mutableSharedFlow.subscribe)
+  flush := (·.mutableSharedFlow.flush)
+  toList := fun flow => do
+    let list ← IO.mkRef ([] : List _)
+    -- See StateFlow instance above for why `Id _` annotation is needed.
+    let _ ← flow.mutableSharedFlow.subscribe fun (a : Id _) => list.modify (a :: ·)
+    flow.mutableSharedFlow.flush
+    (← list.get).reverse |> pure
 
 end Flow.Core

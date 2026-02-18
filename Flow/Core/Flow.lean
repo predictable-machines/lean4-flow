@@ -35,7 +35,7 @@ let flow := Flow.mk fun collector => do
     collector.emit 1
     collector.emit 2
     collector.emit 3
-flow.collect IO.println
+flow.subscribe IO.println
 ```
 -/
 
@@ -58,7 +58,7 @@ def forEach (flow : Flow α) (action : α → IO Unit) : IO Unit :=
     synchronously to completion. This signature enables uniform handling
     with hot streams like SharedFlow.
 -/
-def collect (flow : Flow α) (action : α → IO Unit) : IO (IO Unit) := do
+def subscribe (flow : Flow α) (action : α → IO Unit) : IO (IO Unit) := do
   flow.forEach action
   pure (pure ())
 
@@ -67,59 +67,8 @@ def collectWith (flow : Flow α) (collector : Collector α) : IO Unit :=
   match flow with
   | .mk block => block collector
 
-/-- Transform each emitted value with a function.
-
-    Creates a new Flow that applies the transformation during collection.
-
-    Example:
-    ```lean
-    let flow := Flow.mk fun c => do c.emit 1; c.emit 2; c.emit 3
-    let doubled ← flow.map (· * 2)
-    doubled.forEach IO.println  -- prints 2, 4, 6
-    ```
--/
-def map (flow : Flow α) (f : α → β) : IO (Flow β) :=
-  pure <| Flow.mk fun collector =>
-    flow.collectWith { emit := fun a => collector.emit (f a) }
-
 /-- Flush is a no-op for cold flows since collection is synchronous. -/
 def flush (_ : Flow α) : IO Unit := pure ()
-
-/-- Filter values that satisfy a predicate.
-
-    Creates a new Flow that only emits values passing the predicate.
-
-    Example:
-    ```lean
-    let flow := Flow.mk fun c => do c.emit 1; c.emit 2; c.emit 3; c.emit 4
-    let evens ← flow.filter (· % 2 == 0)
-    evens.forEach IO.println  -- prints 2, 4
-    ```
--/
-def filter (flow : Flow α) (pred : α → Bool) : IO (Flow α) :=
-  pure <| Flow.mk fun collector =>
-    flow.collectWith { emit := fun a => if pred a then collector.emit a else pure () }
-
-/-- Choose and transform values using an optional function.
-
-    Creates a new Flow that applies the chooser function to each value.
-    Values where the function returns `some` are emitted (transformed),
-    values where it returns `none` are filtered out.
-
-    Example:
-    ```lean
-    let flow := Flow.mk fun c => do c.emit 1; c.emit 2; c.emit 3; c.emit 4
-    let chosen ← flow.choose fun n => if n % 2 == 0 then some (n * 10) else none
-    chosen.forEach IO.println  -- prints 20, 40
-    ```
--/
-def choose (flow : Flow α) (f : α → Option β) : IO (Flow β) :=
-  pure <| Flow.mk fun collector =>
-    flow.collectWith { emit := fun a => do
-      match f a with
-      | some b => collector.emit b
-      | none => pure ()
-    }
 
 def combine (flow1 : Flow α) (flow2 : Flow β) : IO (Flow (Sum α β)) :=
   pure <| Flow.mk fun collector => do
@@ -128,16 +77,21 @@ def combine (flow1 : Flow α) (flow2 : Flow β) : IO (Flow (Sum α β)) :=
 
 end Flow
 
-/-- Flow instance of Flows typeclass -/
-instance : Flows Flow where
-  collect := Flow.collect
-  map := Flow.map
-  flush := Flow.flush
-  filter := Flow.filter
-  combine := Flow.combine
+instance : DerivedFlow Flow where
+  derive source handler := pure <| Flow.mk fun collector =>
+    source.collectWith { emit := handler collector.emit }
 
-/-- Flow instance of Chooses typeclass -/
-instance : Chooses Flow where
-  choose := Flow.choose
+instance : Flows Flow IO Id where
+  combine := Flow.combine
+  subscribe := Flow.subscribe
+  flush := Flow.flush
+
+/-- BEq instance for Id: since Id is the identity, delegate to inner type -/
+instance [inst : BEq α] : BEq (Id α) where
+  beq x y := inst.beq (x : α) (y : α)
+
+/-- Repr instance for Id: since Id is the identity, delegate to inner type -/
+instance [Repr α] : Repr (Id α) where
+  reprPrec x p := reprPrec (x : α) p
 
 end Flow.Core
