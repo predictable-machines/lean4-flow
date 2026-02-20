@@ -4,71 +4,74 @@ import PredictableFlow.Index
 open PredictableCore.Shared
 open Flow.Core
 
-namespace PredictableProgram
-
-structure ReactiveProgramHandler (α ε : Type) where
-  writeFlow : MutableProgramFlow (ReactiveError ε) (ReactiveMessage α ε)
-  finishingPromise : IO.Promise Unit
-
-def isExit : ReactiveMessage α ε → Bool
-  | .user UserMessage.exit => true
-  | _ => false
+namespace ReactiveProgram
 
 def init
-    {σ α ε : Type}
-    (definition : ReactiveProgramDefinition σ α ε)
-    : BaseProgram (ReactiveProgramHandler α ε) := do
-  let config ← PredictableProgram.ask
-  let programState ← PredictableProgram.get
-  let (stateFlow : MutableStateFlow σ) ← MutableStateFlow.create definition.initialState
-  let writeFlow ← MutableProgramFlow.create
-    config
-    (initialState := programState)
-    (replay := 10)
+    [Flows.MergeableState σ]
+    [ProgramLogger ψ]
+    (definition : ReactiveProgramDefinition ψ σ ε α)
+    : Program ψ σ ε (IO.Promise (Option (Except ε σ))) := do
+  let state ← MonadState.get
+  let config ← MonadReader.read
+  let flow : MutableProgramFlow ψ σ ε α ←
+    MutableProgramFlow.create config (initialState := state) (replay := 10)
+  let finishingPromise ← IO.Promise.new (α := Option (Except ε σ))
 
-  let finishingPromise ← IO.Promise.new (α := Unit)
+  let accessor : FlowAccessor α :=
+    { emit := fun m => flow.emit m
+      close := flow.close }
 
-  let processMessage
-      (exceptMsg : Except (ReactiveError ε)
-      (ReactiveMessage α ε))
-      : PredictableProgram (ReactiveError ε) Unit := do
-    match exceptMsg with
-    | .error _ => pure ()
-    | .ok msg =>
-      if isExit msg then
-        finishingPromise.resolve ()
-        stateFlow.close
-        writeFlow.close
-        return ()
-      match ← (stateFlow.value : IO (Option σ)) with
+  let processMsg (event : α) : Program ψ σ ε Unit := do
+    let currentState ← MonadState.get
+    let newState := definition.update currentState event
+    MonadState.set newState
+    let _ ← definition.onUpdated newState
+    let stateAfterUpdate ← MonadState.get
+    definition.sideEffect stateAfterUpdate event accessor
+
+  let readFinalState : IO (Option σ) := do
+    if h : 0 < flow.stateMutexes.size then
+      some <$> flow.stateMutexes[0].atomically do return ← get
+    else
+      pure none
+
+  let _ ← flow.underlying.subscribe fun (exceptVal : Except ε α) => do
+    match exceptVal with
+    | .ok event =>
+      let result ← Flows.withStateSync flow.stateMutexes flow.config (processMsg event)
+      match result with
+      | .error e =>
+        let finalState ← readFinalState
+        finishingPromise.resolve (finalState.map fun _ => Except.error e)
+        flow.close
+      | .ok () =>
+        if ← flow.isClosed then
+          let finalState ← readFinalState
+          finishingPromise.resolve (finalState.map Except.ok)
+    | .error err =>
+      match definition.onError err with
+      | some event => flow.emit event
       | none => pure ()
-      | some state =>
-      let newState := definition.update state msg
-      (stateFlow.emit newState : IO Unit)
-      let _ ←
-        IO.asTask do
-          match ← Flows.withStateSync
-            writeFlow.stateMutex
-            writeFlow.config
-            (definition.sideEffect newState msg writeFlow.emit)
-          with
-          | .ok () => pure ()
-          | .error err => writeFlow.emit (.error err)
 
-      pure ()
+  match definition.firstMessage with
+  | some msg => flow.emit msg
+  | none => definition.onUpdated definition.initialState
 
-  let processState (state : σ) : IO Unit := do
-    match ← Flows.withStateSync
-      writeFlow.stateMutex
-      writeFlow.config
-      (definition.onUpdated state)
-    with
-    | .ok () => pure ()
-    | .error err => writeFlow.emit (.error err)
+  pure finishingPromise
 
-  let _ ← stateFlow.subscribe processState
-  let _ ← writeFlow.subscribe processMessage
+def launchReactiveProgram
+    [Flows.MergeableState σ']
+    [ProgramLogger ψ]
+    (definition : ReactiveProgramDefinition ψ σ' ε α)
+    : Program ψ σ ε (Option σ') := do
+  let promise ←
+    Program.discardState
+      (ReactiveProgram.init definition)
+      definition.initialState
+  let result ← IO.wait promise.result?
+  match result.bind (·) with
+  | some (.ok state) => pure (some state)
+  | some (.error e) => PredictableProgram.throw e
+  | none => pure none
 
-  pure { writeFlow, finishingPromise }
-
-end PredictableProgram
+end ReactiveProgram

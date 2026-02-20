@@ -50,25 +50,25 @@ private def defaultChoose [DerivedFlow F] (flow : F α) (f : α → Option β) :
     implementations for `map`, `filter`, and `choose`.
 -/
 class Flows
-    (F : Type → Type)
-    (M : outParam (Type → Type))
-    (V : outParam (Type → Type))
-    [Monad M]
-    [MonadLiftT IO M]
-    [MonadLiftT V Option]
-    extends DerivedFlow F where
-  subscribe : F α → (V α → M Unit) → IO (IO Unit)
-  flush : F α → M Unit
-  combine : F α → F β → IO (F (α ⊕ β))
-  map : F α → (α → β) → IO (F β) := defaultMap
-  filter : F α → (α → Bool) → IO (F α) := defaultFilter
-  choose : F α → (α → Option β) → IO (F β) := defaultChoose
-  forEach : F α → (V α → M Unit) → M Unit :=
+    (f : Type → Type)
+    (m : outParam (Type → Type))
+    (v : outParam (Type → Type))
+    [Monad m]
+    [MonadLiftT IO m]
+    [MonadLiftT v Option]
+    extends DerivedFlow f where
+  subscribe : f α → (v α → m Unit) → IO (IO Unit)
+  flush : f α → m Unit
+  combine : f α → f β → IO (f (α ⊕ β))
+  map : f α → (α → β) → IO (f β) := defaultMap
+  filter : f α → (α → Bool) → IO (f α) := defaultFilter
+  choose : f α → (α → Option β) → IO (f β) := defaultChoose
+  forEach : f α → (v α → m Unit) → m Unit :=
     fun flow f => do
       let unsub ← (subscribe flow f : IO _)
       flush flow
       unsub
-  toList : F α → M (List α) :=
+  toList : f α → m (List α) :=
     fun flow => do
       let list ← (IO.mkRef ([] : List α) : IO _)
       let unsub ← (subscribe flow fun a => do
@@ -83,43 +83,62 @@ class Flows
 
 namespace Flows
 
-/-- Bridge: run a PredictableProgram action atomically using a shared mutex.
+class Combinable (α : Type) where
+  combine : α → α → α
+
+instance : Combinable PredictableConfig where
+  combine c _ := c
+
+class MergeableState (α : Type) where
+  merge (initial new existing : α) : α
+  withoutMergeable (initial : α) : α
+
+instance : MergeableState PredictableState where
+  merge initial new existing :=
+    let inputDelta := new.inputTokens - initial.inputTokens
+    let outputDelta := new.outputTokens - initial.outputTokens
+    { existing with
+      inputTokens := existing.inputTokens + inputDelta
+      outputTokens := existing.outputTokens + outputDelta }
+  withoutMergeable existing := existing
+
+/-- Bridge: run a Program action atomically using shared mutexes.
 
     Three-phase protocol:
-    1. **Snapshot**: atomically read current state from mutex
-    2. **Execute**: run the program with the snapshot (logs cleared)
-    3. **Merge**: atomically compute token deltas (new − initial),
-       add them to the current mutex state, and append logs
+    1. **Snapshot**: atomically read current state from the primary mutex
+    2. **Execute**: run the program with a clean copy of the snapshot
+       (non-mergeable fields stripped via `MergeableState.withoutMergeable`)
+    3. **Merge**: atomically combine the program's new state into
+       every mutex's current state via `MergeableState.merge`
 
-    This ensures concurrent callbacks each contribute their own token
-    usage without overwriting each other's updates.
+    This ensures concurrent callbacks each contribute their own state
+    changes without overwriting each other's updates. When multiple mutexes
+    are provided (e.g. from combined flows), the delta is propagated to all.
 
-    Called automatically by ProgramFlow/MutableProgramFlow subscribe
+    Called automatically by MutableProgramFlow subscribe
     callbacks for thread-safe state access across concurrent emissions.
 
     Returns the Except result without unwrapping it. -/
 def withStateSync
-    (mutex : Std.Mutex PredictableState)
-    (config : PredictableConfig)
-    (program : PredictableProgram ε α)
+    [MergeableState σ]
+    (mutexes : Array (Std.Mutex σ))
+    (config : ψ)
+    (program : Program ψ σ ε α)
     : IO (Except ε α) := do
-  let initialState ← mutex.atomically do return ← get
-  let (result, newState) ←
-    PredictableProgram.run program config { initialState with logs := [] }
+  if h : 0 < mutexes.size then
+    let initialState ← mutexes[0].atomically do return ← get
+    let (result, newState) ←
+      Program.run program config (MergeableState.withoutMergeable initialState)
 
-  mutex.atomically do
-    let existingState ← get
-    let inputDelta := newState.inputTokens - initialState.inputTokens
-    let outputDelta := newState.outputTokens - initialState.outputTokens
+    for mutex in mutexes do
+      mutex.atomically do
+        let existingState ← get
+        set <| MergeableState.merge initialState newState existingState
 
-    set
-      { existingState with
-        inputTokens := existingState.inputTokens + inputDelta
-        outputTokens := existingState.outputTokens + outputDelta
-        logs := existingState.logs ++ newState.logs }
     pure result
+  else
+    throw (.userError "withStateSync: empty mutex array")
 
 end Flows
-
 
 end Flow.Core
