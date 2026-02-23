@@ -12,23 +12,32 @@ syntax "`[RctProg|\n"
 private def findTerm
     (name : String)
     (fields : TSyntaxArray `rctField)
-    : Option Term := do
-  let field ← fields.find? (fun f => f.raw[0]? |>.map (·.getId.toString == name) |>.getD false)
-  pure ⟨← field.raw[2]?⟩
+    : Option Term :=
+  fields.find? (fun f => f.raw[0]? |>.map (·.getId.toString == name) |>.getD false)
+  |>.bind (·.raw[2]?)
+  |>.map (⟨·⟩)
 
 private def requireTerm
     (name : String)
     (fields : TSyntaxArray `rctField)
     : MacroM Term := do
-  let maybeTerm :=
-    fields.find? (fun f => f.raw[0]? |>.map (·.getId.toString == name) |>.getD false)
-    |>.bind (·.raw[2]?)
-    |>.map (fun f => (⟨f⟩ : Term))
-  let some term := maybeTerm | Macro.throwError s!"Missing required field {name}"
+  let some term :=
+    findTerm name fields
+    | Macro.throwError s!"Missing required field {name}"
   pure term
 
+private def findAllTerms
+    (name : String)
+    (fields : TSyntaxArray `rctField)
+    : Array Term :=
+  fields.filterMap fun f =>
+    if f.raw[0]? |>.map (·.getId.toString == name) |>.getD false then
+      f.raw[2]? |>.map (⟨·⟩)
+    else
+      none
+
 private def knownFields : List String :=
-  ["initialState", "update", "sideEffect", "onUpdated", "onError", "firstMessage"]
+  ["initialState", "update", "sideEffect", "onUpdated", "onError", "firstMessage", "source"]
 
 private def validateFieldNames (fields : TSyntaxArray `rctField) : MacroM Unit := do
   for field in fields do
@@ -48,12 +57,14 @@ macro_rules
 
     let onError := fields |> findTerm "onError" |>.getD (← `(fun _ => none))
     let firstMessage := fields |> findTerm "firstMessage" |>.getD (← `(none))
+    let sources := fields |> findAllTerms "source"
+    let sourceList ← `([$[$sources],*])
 
-    `(ReactiveProgram.launchReactiveProgram {
-        initialState := $initialState
+    `(ReactiveProgram.launchReactiveProgram
+      { initialState := $initialState
         update := $update
         sideEffect := $sideEffect
         onUpdated := $onUpdated
         onError := $onError
         firstMessage := $firstMessage
-      })
+        sourceFlows := $sourceList })

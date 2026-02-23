@@ -9,7 +9,7 @@ namespace Flow.Core
 /-! # Flow Operators and Flows Typeclass
 
 `DerivedFlow` defines a single derivation mechanism for constructing transformed flows.
-`Flows` extends `DerivedFlow` and provides `map`, `filter`, `choose` with defaults
+`Flows` extends `DerivedFlow` and provides `map`, `filter`, `filterMap` with defaults
 derived from `derive`, plus `combine`, `subscribe`, `flush`, `forEach`, and `toList`.
 -/
 
@@ -31,7 +31,7 @@ private def defaultMap [DerivedFlow F] (flow : F α) (f : α → β) : IO (F β)
 private def defaultFilter [DerivedFlow F] (flow : F α) (pred : α → Bool) : IO (F α) :=
   DerivedFlow.derive flow fun emit a => if pred a then emit a else pure ()
 
-private def defaultChoose [DerivedFlow F] (flow : F α) (f : α → Option β) : IO (F β) :=
+private def defaultFilterMap [DerivedFlow F] (flow : F α) (f : α → Option β) : IO (F β) :=
   DerivedFlow.derive flow fun emit a =>
     match f a with
     | some b => emit b
@@ -47,7 +47,7 @@ private def defaultChoose [DerivedFlow F] (flow : F α) (f : α → Option β) :
     `M` and `V` are `outParam`s — inferred automatically from `F`.
 
     Extends `DerivedFlow F` — instances must provide `derive`, which enables default
-    implementations for `map`, `filter`, and `choose`.
+    implementations for `map`, `filter`, and `filterMap`.
 -/
 class Flows
     (f : Type → Type)
@@ -62,7 +62,7 @@ class Flows
   combine : f α → f β → IO (f (α ⊕ β))
   map : f α → (α → β) → IO (f β) := defaultMap
   filter : f α → (α → Bool) → IO (f α) := defaultFilter
-  choose : f α → (α → Option β) → IO (f β) := defaultChoose
+  filterMap : f α → (α → Option β) → IO (f β) := defaultFilterMap
   forEach : f α → (v α → m Unit) → m Unit :=
     fun flow f => do
       let unsub ← (subscribe flow f : IO _)
@@ -115,7 +115,7 @@ instance : MergeableState PredictableState where
     changes without overwriting each other's updates. When multiple mutexes
     are provided (e.g. from combined flows), the delta is propagated to all.
 
-    Called automatically by MutableProgramFlow subscribe
+    Called automatically by ProgramFlow subscribe
     callbacks for thread-safe state access across concurrent emissions.
 
     Returns the Except result without unwrapping it. -/
@@ -126,16 +126,26 @@ def withStateSync
     (program : Program ψ σ ε α)
     : IO (Except ε α) := do
   if h : 0 < mutexes.size then
-    let initialState ← mutexes[0].atomically do return ← get
-    let (result, newState) ←
-      Program.run program config (MergeableState.withoutMergeable initialState)
-
+    let mut initialStates : Array σ := #[]
     for mutex in mutexes do
-      mutex.atomically do
-        let existingState ← get
-        set <| MergeableState.merge initialState newState existingState
+      let state ← mutex.atomically do return ← get
+      initialStates := initialStates.push state
 
-    pure result
+    -- Logically always true (loop pushes one per mutex), but Lean needs the
+    -- proof term h' for the initialStates[0] index below.
+    if h' : 0 < initialStates.size then
+      let (result, newState) ←
+        Program.run program config (MergeableState.withoutMergeable initialStates[0])
+
+      for (idx, mutex) in mutexes.mapIdx (·,·) do
+        if h'' : idx < initialStates.size then
+          mutex.atomically do
+            let existingState ← get
+            set <| MergeableState.merge initialStates[idx] newState existingState
+
+      pure result
+    else
+      throw (.userError "withStateSync: empty mutex array")
   else
     throw (.userError "withStateSync: empty mutex array")
 

@@ -4,21 +4,48 @@ import PredictableFlow.Index
 open PredictableCore.Shared
 open Flow.Core
 
+structure FlowAccessor (α : Type) where
+  emit : α → IO Unit
+  close : IO Unit
+
+structure ReactiveProgramDefinition (ψ σ ε α : Type) where
+  initialState : σ
+  update : σ → α → σ
+  sideEffect : σ → α → FlowAccessor α → Program ψ σ ε Unit
+  onUpdated : σ → Program ψ σ ε Unit
+  onError : ε → Option α := fun _ => none
+  firstMessage : Option α := none
+  sourceFlows : List (ProgramFlow ψ σ ε α)
+
 namespace ReactiveProgram
+
+private def combineSourceFlows
+    [Flows.MergeableState σ]
+    [Flows.Combinable ψ]
+    (sources : List (ProgramFlow ψ σ ε α))
+    : Program ψ σ ε (ProgramFlow ψ σ ε α) := do
+  match sources with
+    | [] => ProgramFlow.create (replay := 10)
+    | head :: tail =>
+      tail.foldlM
+        (fun acc source => do
+          let combined ← ProgramFlow.combine acc source
+          DerivedFlow.derive combined fun emit val =>
+            match val with
+            | .inl a => emit a
+            | .inr a => emit a)
+        head
 
 def init
     [Flows.MergeableState σ]
     [ProgramLogger ψ]
+    [Flows.Combinable ψ]
     (definition : ReactiveProgramDefinition ψ σ ε α)
     : Program ψ σ ε (IO.Promise (Option (Except ε σ))) := do
-  let state ← MonadState.get
-  let config ← MonadReader.read
-  let flow : MutableProgramFlow ψ σ ε α ←
-    MutableProgramFlow.create config (initialState := state) (replay := 10)
-  let finishingPromise ← IO.Promise.new (α := Option (Except ε σ))
+  let flow ← combineSourceFlows definition.sourceFlows
 
   let accessor : FlowAccessor α :=
-    { emit := fun m => flow.emit m
+    { emit := flow.emit
       close := flow.close }
 
   let processMsg (event : α) : Program ψ σ ε Unit := do
@@ -34,6 +61,8 @@ def init
       some <$> flow.stateMutexes[0].atomically do return ← get
     else
       pure none
+
+  let finishingPromise ← IO.Promise.new (α := Option (Except ε σ))
 
   let _ ← flow.underlying.subscribe fun (exceptVal : Except ε α) => do
     match exceptVal with
@@ -62,6 +91,7 @@ def init
 def launchReactiveProgram
     [Flows.MergeableState σ']
     [ProgramLogger ψ]
+    [Flows.Combinable ψ]
     (definition : ReactiveProgramDefinition ψ σ' ε α)
     : Program ψ σ ε (Option σ') := do
   let promise ←
@@ -70,8 +100,8 @@ def launchReactiveProgram
       definition.initialState
   let result ← IO.wait promise.result?
   match result.bind (·) with
-  | some (.ok state) => pure (some state)
-  | some (.error e) => PredictableProgram.throw e
-  | none => pure none
+    | some (.ok state) => pure (some state)
+    | some (.error e) => PredictableProgram.throw e
+    | none => pure none
 
 end ReactiveProgram

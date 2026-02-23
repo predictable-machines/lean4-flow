@@ -7,9 +7,9 @@ namespace Flow.Core
 
 open PredictableCore.Shared
 
-/-! # MutableProgramFlow - Hot, multicast streams in PredictableProgram context
+/-! # ProgramFlow - Hot, multicast streams in PredictableProgram context
 
-A MutableProgramFlow wraps a `MutableSharedFlow (Except ε α)` with shared
+A ProgramFlow wraps a `MutableSharedFlow (Except ε α)` with shared
 `Std.Mutex σ` instances so that collection callbacks can run in the
 `Program ψ σ ε` monad with thread-safe state access.
 
@@ -25,14 +25,14 @@ Type parameters:
 - `α`: value type
 -/
 
-structure MutableProgramFlow (ψ σ ε α : Type) where
+structure ProgramFlow (ψ σ ε α : Type) where
   underlying : MutableSharedFlow (Except ε α)
   stateMutexes : Array (Std.Mutex σ)
   config : ψ
 
 instance
   [Flows.MergeableState σ]
-  : DerivedFlow (fun α => MutableProgramFlow ψ σ ε α)
+  : DerivedFlow (fun α => ProgramFlow ψ σ ε α)
 where
   derive flow handler := do
     let derived ← DerivedFlow.derive flow.underlying fun emit exceptVal =>
@@ -41,64 +41,65 @@ where
       | .error e => emit (Except.error e)
     pure { underlying := derived, stateMutexes := flow.stateMutexes, config := flow.config }
 
-namespace MutableProgramFlow
+namespace ProgramFlow
 
 def create
-    (config : ψ)
-    (initialState : σ)
     (replay : Nat := 0)
     (bufferSize : Nat := 64)
     (onBufferOverflow : BufferOverflow := .dropOldest)
-    : IO (MutableProgramFlow ψ σ ε α) := do
+    : Program ψ σ ε (ProgramFlow ψ σ ε α) := do
+  let state ← get
+  let config ← read
   let underlying ← MutableSharedFlow.create
     (α := Except ε α)
     (replay := replay)
     (bufferSize := bufferSize)
     (onBufferOverflow := onBufferOverflow)
-  let stateMutex ← Std.Mutex.new initialState
+  let stateMutex ← Std.Mutex.new state
   pure { underlying, stateMutexes := #[stateMutex], config }
 
-def init
-    (replay : Nat := 0)
-    (bufferSize : Nat := 64)
-    (onBufferOverflow : BufferOverflow := .dropOldest)
-    : Program ψ σ ε (MutableProgramFlow ψ σ ε α) := fun config state => do
-  let flow ← create config (initialState := state) (replay := replay) (bufferSize := bufferSize)
-    (onBufferOverflow := onBufferOverflow)
-  pure (.ok flow, state)
+def liftShared
+    (shared : MutableSharedFlow α)
+    : Program ψ σ ε (ProgramFlow ψ σ ε α) := do
+  let state ← get
+  let config ← read
+  let stateMutex ← Std.Mutex.new state
+  let underlying ← Flows.map shared (Except.ok ·)
+  pure { underlying, stateMutexes := #[stateMutex], config }
 
-def emit (flow : MutableProgramFlow ψ σ ε α) (value : α) : IO Unit :=
+
+def emit (flow : ProgramFlow ψ σ ε α) (value : α) : IO Unit :=
   flow.underlying.emit (.ok value)
 
-def emitError (flow : MutableProgramFlow ψ σ ε α) (error : ε) : IO Unit :=
+def emitError (flow : ProgramFlow ψ σ ε α) (error : ε) : IO Unit :=
   flow.underlying.emit (.error error)
 
-def emitExcept (flow : MutableProgramFlow ψ σ ε α) (value : Except ε α) : IO Unit :=
+def emitExcept (flow : ProgramFlow ψ σ ε α) (value : Except ε α) : IO Unit :=
   flow.underlying.emit value
 
-def emitAll (flow : MutableProgramFlow ψ σ ε α) (values : List α) : IO Unit := do
+def emitAll (flow : ProgramFlow ψ σ ε α) (values : List α) : IO Unit := do
   for value in values do
     flow.emit value
 
-def close (flow : MutableProgramFlow ψ σ ε α) : IO Unit :=
+def close (flow : ProgramFlow ψ σ ε α) : IO Unit :=
   flow.underlying.close
 
-def isClosed (flow : MutableProgramFlow ψ σ ε α) : IO Bool :=
+def isClosed (flow : ProgramFlow ψ σ ε α) : IO Bool :=
   flow.underlying.isClosed
 
-def subscriberCount (flow : MutableProgramFlow ψ σ ε α) : IO Nat :=
+def subscriberCount (flow : ProgramFlow ψ σ ε α) : IO Nat :=
   flow.underlying.subscriberCount
 
 def subscribe
     [inst : Flows.MergeableState σ]
-    (flow : MutableProgramFlow ψ σ ε α)
+    (flow : ProgramFlow ψ σ ε α)
     (action : Except ε α → Program ψ σ ε Unit)
     : IO (IO Unit) := do
   flow.underlying.subscribe fun exceptVal => do
     let _ ← Flows.withStateSync flow.stateMutexes flow.config (action exceptVal)
     pure ()
 
-def flush (flow : MutableProgramFlow ψ σ ε α) : Program ψ σ ε Unit := do
+def flush (flow : ProgramFlow ψ σ ε α) : Program ψ σ ε Unit := do
   flow.underlying.flush
   if h : 0 < flow.stateMutexes.size then
     let updatedState ← flow.stateMutexes[0].atomically do return ← get
@@ -106,9 +107,9 @@ def flush (flow : MutableProgramFlow ψ σ ε α) : Program ψ σ ε Unit := do
 
 def combine
     [Flows.Combinable ψ]
-    (flow1 : MutableProgramFlow ψ σ ε α)
-    (flow2 : MutableProgramFlow ψ σ ε β)
-    : IO (MutableProgramFlow ψ σ ε (α ⊕ β)) := do
+    (flow1 : ProgramFlow ψ σ ε α)
+    (flow2 : ProgramFlow ψ σ ε β)
+    : IO (ProgramFlow ψ σ ε (α ⊕ β)) := do
   let combined ← MutableSharedFlow.combine flow1.underlying flow2.underlying
   let result ← Flows.map combined (fun
     | .inl (.ok a) => Except.ok (.inl a)
@@ -120,18 +121,18 @@ def combine
       stateMutexes := flow1.stateMutexes ++ flow2.stateMutexes
       config := Flows.Combinable.combine flow1.config flow2.config }
 
-end MutableProgramFlow
+end ProgramFlow
 
 instance
   [ProgramLogger ψ]
   [Flows.MergeableState σ]
   [Flows.Combinable ψ]
   : Flows
-      (MutableProgramFlow ψ σ ε ·)
+      (ProgramFlow ψ σ ε ·)
       (Program ψ σ ε)
       (Except ε) where
-  combine := MutableProgramFlow.combine
-  subscribe := fun flow action => MutableProgramFlow.subscribe flow action
-  flush := MutableProgramFlow.flush
+  combine := ProgramFlow.combine
+  subscribe := fun flow action => ProgramFlow.subscribe flow action
+  flush := ProgramFlow.flush
 
 end Flow.Core

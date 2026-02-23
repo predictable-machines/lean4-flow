@@ -304,7 +304,7 @@ def emitAll (flow : MutableSharedFlow α) (values : List α) : IO Unit := do
     flow.emit value
 
 /-- Close the flow, cancelling all subscribers and preventing new emissions and subscriptions.
-    Also cancels any child flows created via map/filter/choose. -/
+    Also cancels any child flows created via map/filter/filterMap. -/
 def close (flow : MutableSharedFlow α) : IO Unit := do
   let actions ← flow.state.atomically do
     let state ← get
@@ -313,7 +313,7 @@ def close (flow : MutableSharedFlow α) : IO Unit := do
   for action in actions do
     action
 
-def choose (flow : SharedFlow α) (f : α → Option β) : IO (MutableSharedFlow β) := do
+def filterMap (flow : SharedFlow α) (f : α → Option β) : IO (MutableSharedFlow β) := do
   flow.state.atomically do
     let state ← get
     let chosen ← MutableSharedFlow.create
