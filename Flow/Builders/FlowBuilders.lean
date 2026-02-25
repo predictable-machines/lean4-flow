@@ -71,4 +71,19 @@ def replicate (value : α) (count : Nat) : Flow α :=
     for _ in [:count] do
       collector.emit value
 
+/-- Create a cold flow from a pull-based IO source.
+    Each collection runs the source independently.
+    The source returns `none` to signal end-of-stream. -/
+def fromIOAction (action : IO (Option α)) : Flow α :=
+  Flow.mk fun collector => do
+    repeat do
+      match ← action with
+      | none => break
+      | some value => collector.emit value
+
+/-- Create a cold flow that reads lines from an `IO (Option String)` source.
+    Specialization of `fromIOAction` for line-oriented IO (process handles, stdin). -/
+def fromLineReader (readLine : IO (Option String)) : Flow String :=
+  fromIOAction readLine
+
 end Flow.Builders

@@ -8,14 +8,9 @@ namespace Flow.Core
 A Flow is a cold stream that emits values sequentially when collected.
 Each collection starts fresh execution - multiple collectors get independent streams.
 
-## Why `unsafe`?
-
-Flow is marked `unsafe` because it contains a self-referential function type.
-The constructor stores `(Collector α → IO Unit)` which may reference Flow recursively
-in builder patterns. This follows the same pattern as IOStream.
-
-All operations are standard safe IO operations. The `unsafe` marker is a Lean
-type system constraint for recursive structures, not a runtime safety concern.
+Flow is a regular `inductive` type whose single constructor stores
+`(Collector α → IO Unit)`. The function does not reference `Flow` recursively
+at the type level, so no `unsafe` marker is needed.
 
 ## Comparison to Kotlin Flow
 
@@ -74,6 +69,58 @@ def combine (flow1 : Flow α) (flow2 : Flow β) : IO (Flow (Sum α β)) :=
   pure <| Flow.mk fun collector => do
     flow1.collectWith { emit := fun a => collector.emit (Sum.inl a) }
     flow2.collectWith { emit := fun b => collector.emit (Sum.inr b) }
+
+/-- Fold all emissions into an accumulator. -/
+def fold (flow : Flow α) (f : β → α → β) (init : β) : IO β := do
+  let acc ← IO.mkRef init
+  flow.forEach fun a => acc.modify (f · a)
+  acc.get
+
+/-- Find the first emission matching a predicate.
+    Does not short-circuit the source; remaining emissions are ignored. -/
+def find (flow : Flow α) (pred : α → Bool) : IO (Option α) := do
+  let result ← IO.mkRef (none : Option α)
+  flow.forEach fun a => do
+    if (← result.get).isNone && pred a then
+      result.set (some a)
+  result.get
+
+/-- Check if any emission matches a predicate. -/
+def any (flow : Flow α) (pred : α → Bool) : IO Bool := do
+  (← flow.find pred).isSome |> pure
+
+/-- Check if all emissions match a predicate.
+    Returns `true` for an empty flow. -/
+def all (flow : Flow α) (pred : α → Bool) : IO Bool := do
+  let failed ← IO.mkRef false
+  flow.forEach fun a => do
+    if !(← failed.get) && !pred a then
+      failed.set true
+  (← failed.get) |> (!·) |> pure
+
+/-- Count the number of emissions. -/
+def count (flow : Flow α) : IO Nat :=
+  flow.fold (fun n _ => n + 1) 0
+
+/-- Emit only the first `n` values.
+    Does not short-circuit the source; remaining emissions are ignored. -/
+def take (flow : Flow α) (n : Nat) : Flow α :=
+  Flow.mk fun collector => do
+    let counter ← IO.mkRef 0
+    flow.forEach fun a => do
+      let c ← counter.get
+      if c < n then
+        collector.emit a
+        counter.set (c + 1)
+
+/-- Append two flows sequentially. The second flow emits after the first completes. -/
+def append (flow1 : Flow α) (flow2 : Flow α) : Flow α :=
+  Flow.mk fun collector => do
+    flow1.collectWith collector
+    flow2.collectWith collector
+
+instance : Append (Flow α) where
+  append := Flow.append
 
 end Flow
 
