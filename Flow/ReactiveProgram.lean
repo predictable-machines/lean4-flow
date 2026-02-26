@@ -8,41 +8,36 @@ structure FlowAccessor (α : Type) where
   emit : α → IO Unit
   close : IO Unit
 
-structure ReactiveProgramDefinition (ψ σ ε α : Type) where
+
+structure ReactiveProgramDefinition (f : Type → Type) (ψ σ ε α : Type) where
   initialState : σ
   update : σ → α → σ
   sideEffect : σ → α → FlowAccessor α → Program ψ σ ε Unit
   onUpdated : σ → Program ψ σ ε Unit
   onError : ε → Option α := fun _ => none
   firstMessage : Option α := none
-  sourceFlows : List (ProgramFlow ψ σ ε α)
+  sources [IOSubscribable f] : Array (f α)
+  onClose : Array (IO Unit)
 
 namespace ReactiveProgram
 
-private def combineSourceFlows
-    [Flows.MergeableState σ]
-    [Flows.Combinable ψ]
-    (sources : List (ProgramFlow ψ σ ε α))
-    : Program ψ σ ε (ProgramFlow ψ σ ε α) := do
-  match sources with
-    | [] => ProgramFlow.create (replay := 10)
-    | head :: tail =>
-      tail.foldlM
-        (fun acc source => do
-          let combined ← ProgramFlow.combine acc source
-          DerivedFlow.derive combined fun emit val =>
-            match val with
-            | .inl a => emit a
-            | .inr a => emit a)
-        head
-
 def init
+    [IOSubscribable f]
     [Flows.MergeableState σ]
     [ProgramLogger ψ]
-    [Flows.Combinable ψ]
-    (definition : ReactiveProgramDefinition ψ σ ε α)
+    (definition : ReactiveProgramDefinition f ψ σ ε α)
     : Program ψ σ ε (IO.Promise (Option (Except ε σ))) := do
-  let flow ← combineSourceFlows definition.sourceFlows
+  let flow ← ProgramFlow.create (replay := 10)
+
+  for source in definition.sources do
+    let close ← IOSubscribable.subscribe source flow.emit
+    flow.underlying.state.atomically do
+      let state ← get
+      set { state with closeActions := state.closeActions.push close }
+
+  flow.underlying.state.atomically do
+    let state ← get
+    set { state with closeActions := state.closeActions ++ definition.onClose }
 
   let accessor : FlowAccessor α :=
     { emit := flow.emit
@@ -89,10 +84,10 @@ def init
   pure finishingPromise
 
 def launchReactiveProgram
+    [IOSubscribable f]
     [Flows.MergeableState σ']
     [ProgramLogger ψ]
-    [Flows.Combinable ψ]
-    (definition : ReactiveProgramDefinition ψ σ' ε α)
+    (definition : ReactiveProgramDefinition f ψ σ' ε α)
     : Program ψ σ ε (Option σ') := do
   let promise ←
     Program.discardState

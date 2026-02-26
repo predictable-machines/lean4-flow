@@ -37,7 +37,14 @@ private def findAllTerms
       none
 
 private def knownFields : List String :=
-  ["initialState", "update", "sideEffect", "onUpdated", "onError", "firstMessage", "source"]
+  [ "initialState",
+    "update",
+    "sideEffect",
+    "onUpdated",
+    "onError",
+    "firstMessage",
+    "source",
+    "onClose" ]
 
 private def validateFieldNames (fields : TSyntaxArray `rctField) : MacroM Unit := do
   for field in fields do
@@ -57,8 +64,14 @@ macro_rules
 
     let onError := fields |> findTerm "onError" |>.getD (← `(fun _ => none))
     let firstMessage := fields |> findTerm "firstMessage" |>.getD (← `(none))
-    let sources := fields |> findAllTerms "source"
-    let sourceList ← `([$[$sources],*])
+
+    let sourceTerms := fields |> findAllTerms "source"
+    let sourceExprs ← sourceTerms.mapM fun sourceTerm => do
+      match sourceTerm with
+      | `(($flow, $transform)) => `(Flow.Core.IOSubscribable.mapped $flow $transform)
+      | `($flow) => `(Flow.Core.IOSubscribable.mapped $flow some)
+
+    let onClose := fields |> findAllTerms "onClose"
 
     `(ReactiveProgram.launchReactiveProgram
       { initialState := $initialState
@@ -67,4 +80,5 @@ macro_rules
         onUpdated := $onUpdated
         onError := $onError
         firstMessage := $firstMessage
-        sourceFlows := $sourceList })
+        sources := #[$sourceExprs,*],
+        onClose := #[$onClose,*] })

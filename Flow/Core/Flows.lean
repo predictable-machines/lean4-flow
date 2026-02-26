@@ -15,10 +15,10 @@ derived from `derive`, plus `combine`, `subscribe`, `flush`, `forEach`, and `toL
 
 /-- Construct a derived flow from a source, given a handler that processes
     each emission and decides what to emit downstream. -/
-class DerivedFlow (F : Type → Type) where
+class DerivedFlow (f : Type → Type) where
   /-- Create a derived flow where each source emission is processed by a handler
       that receives an `emit` callback and the source value. -/
-  derive : F α → ((β → IO Unit) → α → IO Unit) → IO (F β)
+  derive : f α → ((β → IO Unit) → α → IO Unit) → IO (f β)
 
 instance : MonadLiftT (Except ε) Option where
   monadLift
@@ -57,17 +57,25 @@ class Flows
     [MonadLiftT IO m]
     [MonadLiftT v Option]
     extends DerivedFlow f where
+  /-- Register a callback for each emission. Returns an unsubscribe action. -/
   subscribe : f α → (v α → m Unit) → IO (IO Unit)
+  /-- Drive the flow to completion, blocking until all items are emitted. -/
   flush : f α → m Unit
+  /-- Merge two flows into one, tagging emissions with `Sum.inl` / `Sum.inr`. -/
   combine : f α → f β → IO (f (α ⊕ β))
+  /-- Transform each emission. Defaults to `derive` with a mapping handler. -/
   map : f α → (α → β) → IO (f β) := defaultMap
+  /-- Keep only emissions satisfying a predicate. Defaults to `derive`. -/
   filter : f α → (α → Bool) → IO (f α) := defaultFilter
+  /-- Transform and filter in one pass: emit only `some` results. -/
   filterMap : f α → (α → Option β) → IO (f β) := defaultFilterMap
+  /-- Subscribe, flush, then unsubscribe — process every emission exactly once. -/
   forEach : f α → (v α → m Unit) → m Unit :=
     fun flow f => do
       let unsub ← (subscribe flow f : IO _)
       flush flow
       unsub
+  /-- Collect all emissions into a list (subscribe, flush, unsubscribe). -/
   toList : f α → m (List α) :=
     fun flow => do
       let list ← (IO.mkRef ([] : List α) : IO _)
@@ -79,20 +87,63 @@ class Flows
       unsub
       (← (list.get : IO _)).reverse |> pure
 
+/-- Simplified subscribe interface using plain `IO` callbacks.
+    Useful when callers don't need the full `m`/`v` generality of `Flows`. -/
+class IOSubscribable (f : Type → Type) where
+  subscribe : f α → (α → IO Unit) → IO (IO Unit)
 
+/-- Any `Flows` instance is automatically `IOSubscribable` by unwrapping `v`. -/
+instance
+    [Monad m]
+    [MonadLiftT IO m]
+    [MonadLiftT v Option]
+    [Flows f m v]
+    : IOSubscribable f where
+  subscribe flow callback :=
+    Flows.subscribe flow fun va => do
+      match MonadLiftT.monadLift va with
+      | some a => callback a
+      | none => pure ()
+
+/-- Type-erased subscription handle so heterogeneous source types can share a list. -/
+structure IOSubscription (α : Type) where
+  subscribe : (α → IO Unit) → IO (IO Unit)
+
+/-- Trivial instance: an `IOSubscription` already holds a subscribe function. -/
+instance : IOSubscribable IOSubscription where
+  subscribe sub callback := sub.subscribe callback
+
+/-- Build a type-erased `IOSubscription` by applying a partial transform to a source.
+    Emissions where `transform` returns `none` are silently dropped. -/
+def IOSubscribable.mapped
+    [IOSubscribable f]
+    (source : f β)
+    (transform : β → Option α)
+    : IOSubscription α :=
+  { subscribe := fun callback => IOSubscribable.subscribe source fun b =>
+      match transform b with
+      | some a => callback a
+      | none => pure () }
 
 namespace Flows
 
+/-- Types whose values can be combined into one (e.g. config merging). -/
 class Combinable (α : Type) where
   combine : α → α → α
 
+/-- Config is left-biased: the first value always wins. -/
 instance : Combinable PredictableConfig where
   combine c _ := c
 
+/-- Three-way merge for concurrent state updates.
+    `merge initial new existing` computes the delta `new - initial` and applies it to `existing`,
+    so independent mutations from different callbacks compose correctly. -/
 class MergeableState (α : Type) where
   merge (initial new existing : α) : α
+  /-- Strip fields that participate in merging, giving a clean baseline for execution. -/
   withoutMergeable (initial : α) : α
 
+/-- Token-count fields are merged additively; all other fields use `existing` as-is. -/
 instance : MergeableState PredictableState where
   merge initial new existing :=
     let inputDelta := new.inputTokens - initial.inputTokens
