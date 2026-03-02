@@ -60,16 +60,16 @@ macro_rules
     let initialState ← fields |> requireTerm "initialState"
     let update ← fields |> requireTerm "update"
     let sideEffect ← fields |> requireTerm "sideEffect"
-    let onUpdated ← fields |> requireTerm "onUpdated"
 
+    let onUpdated := fields |> findTerm "onUpdated" |>.getD (← `(fun _ => pure ()))
     let onError := fields |> findTerm "onError" |>.getD (← `(fun _ => none))
     let firstMessage := fields |> findTerm "firstMessage" |>.getD (← `(none))
 
     let sourceTerms := fields |> findAllTerms "source"
     let sourceExprs ← sourceTerms.mapM fun sourceTerm => do
       match sourceTerm with
-      | `(($flow, $transform)) => `(Flow.Core.IOSubscribable.mapped $flow $transform)
-      | `($flow) => `(Flow.Core.IOSubscribable.mapped $flow some)
+      | `(($flow, $transform)) => `((Flow.Core.IOSubscribable.mapped $flow $transform : Flow.Core.IOSubscription _ _))
+      | `($flow) => `((Flow.Core.IOSubscription.withExcept (($flow : Flow.Core.IOSubscription _ _)) : Flow.Core.IOSubscription _ _))
 
     let onClose := fields |> findAllTerms "onClose"
 

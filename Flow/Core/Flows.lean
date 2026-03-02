@@ -87,41 +87,41 @@ class Flows
       unsub
       (← (list.get : IO _)).reverse |> pure
 
-/-- Simplified subscribe interface using plain `IO` callbacks.
-    Useful when callers don't need the full `m`/`v` generality of `Flows`. -/
-class IOSubscribable (f : Type → Type) where
-  subscribe : f α → (α → IO Unit) → IO (IO Unit)
+/-- Subscribe interface with support for a value wrapper `v` (e.g. `Id` or `Except ε`).
+    Allows subscribers to handle values and errors through `v α`. -/
+class IOSubscribable (f : Type → Type) (v : outParam (Type → Type)) where
+  subscribe : f α → (v α → IO Unit) → IO (IO Unit)
 
-/-- Any `Flows` instance is automatically `IOSubscribable` by unwrapping `v`. -/
+/-- Any `Flows` instance is automatically `IOSubscribable`. -/
 instance
     [Monad m]
     [MonadLiftT IO m]
     [MonadLiftT v Option]
     [Flows f m v]
-    : IOSubscribable f where
+    : IOSubscribable f v where
   subscribe flow callback :=
-    Flows.subscribe flow fun va => do
-      match MonadLiftT.monadLift va with
-      | some a => callback a
-      | none => pure ()
+    Flows.subscribe flow fun va => MonadLiftT.monadLift (callback va)
 
-/-- Type-erased subscription handle so heterogeneous source types can share a list. -/
-structure IOSubscription (α : Type) where
-  subscribe : (α → IO Unit) → IO (IO Unit)
+/-- Type-erased subscription handle so heterogeneous source types can share a list.
+    `v` comes first so `IOSubscription v` is a proper `Type → Type` for typeclass resolution. -/
+structure IOSubscription (v : Type → Type) (α : Type) where
+  subscribe : (v α → IO Unit) → IO (IO Unit)
 
-/-- Trivial instance: an `IOSubscription` already holds a subscribe function. -/
-instance : IOSubscribable IOSubscription where
+instance : IOSubscribable (IOSubscription v) v where
   subscribe sub callback := sub.subscribe callback
+
+/-- Identity adapter that constrains `v` to `Except ε` for the macro's bare-source case. -/
+def IOSubscription.withExcept (sub : IOSubscription (Except ε) α) : IOSubscription (Except ε) α := sub
 
 /-- Build a type-erased `IOSubscription` by applying a partial transform to a source.
     Emissions where `transform` returns `none` are silently dropped. -/
 def IOSubscribable.mapped
-    [IOSubscribable f]
+    [IOSubscribable f v]
     (source : f β)
-    (transform : β → Option α)
-    : IOSubscription α :=
-  { subscribe := fun callback => IOSubscribable.subscribe source fun b =>
-      match transform b with
+    (transform : v β → Option (w α))
+    : IOSubscription w α :=
+  { subscribe := fun callback => IOSubscribable.subscribe source fun vb =>
+      match transform vb with
       | some a => callback a
       | none => pure () }
 

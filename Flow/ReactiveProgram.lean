@@ -4,33 +4,37 @@ import PredictableFlow.Index
 open PredictableCore.Shared
 open Flow.Core
 
-structure FlowAccessor (α : Type) where
+structure FlowAccessor (ε α : Type) where
   emit : α → IO Unit
+  emitError : ε → IO Unit
   close : IO Unit
 
 
 structure ReactiveProgramDefinition (f : Type → Type) (ψ σ ε α : Type) where
   initialState : σ
   update : σ → α → σ
-  sideEffect : σ → α → FlowAccessor α → Program ψ σ ε Unit
-  onUpdated : σ → Program ψ σ ε Unit
+  sideEffect : α → FlowAccessor ε α → Program ψ σ ε Unit
+  onUpdated : σ → ReaderT ψ (ExceptT ε IO) Unit := fun _ => pure ()
   onError : ε → Option α := fun _ => none
   firstMessage : Option α := none
-  sources [IOSubscribable f] : Array (f α)
+  sources : Array (f α)
   onClose : Array (IO Unit)
 
 namespace ReactiveProgram
 
 def init
-    [IOSubscribable f]
+    [IOSubscribable f (Except ε)]
     [Flows.MergeableState σ]
     [ProgramLogger ψ]
     (definition : ReactiveProgramDefinition f ψ σ ε α)
     : Program ψ σ ε (IO.Promise (Option (Except ε σ))) := do
-  let flow ← ProgramFlow.create (replay := 10)
+  let (flow : ProgramFlow ψ σ ε α) ← ProgramFlow.create (replay := 10)
 
   for source in definition.sources do
-    let close ← IOSubscribable.subscribe source flow.emit
+    let close ← IOSubscribable.subscribe source fun exceptVal =>
+      match exceptVal with
+      | Except.ok a => flow.emit a
+      | Except.error e => flow.emitError e
     flow.underlying.state.atomically do
       let state ← get
       set { state with closeActions := state.closeActions.push close }
@@ -39,21 +43,21 @@ def init
     let state ← get
     set { state with closeActions := state.closeActions ++ definition.onClose }
 
-  let accessor : FlowAccessor α :=
+  let accessor : FlowAccessor ε α :=
     { emit := flow.emit
+      emitError := flow.emitError
       close := flow.close }
 
   let processMsg (event : α) : Program ψ σ ε Unit := do
     let currentState ← MonadState.get
     let newState := definition.update currentState event
     MonadState.set newState
-    let _ ← definition.onUpdated newState
-    let stateAfterUpdate ← MonadState.get
-    definition.sideEffect stateAfterUpdate event accessor
+    definition.onUpdated newState
+    definition.sideEffect event accessor
 
   let readFinalState : IO (Option σ) := do
     if h : 0 < flow.stateMutexes.size then
-      some <$> flow.stateMutexes[0].atomically do return ← get
+      flow.stateMutexes[0].atomically do return ← get
     else
       pure none
 
@@ -65,13 +69,12 @@ def init
       let result ← Flows.withStateSync flow.stateMutexes flow.config (processMsg event)
       match result with
       | .error e =>
-        let finalState ← readFinalState
-        finishingPromise.resolve (finalState.map fun _ => Except.error e)
+        finishingPromise.resolve <| some <| Except.error e
         flow.close
       | .ok () =>
         if ← flow.isClosed then
           let finalState ← readFinalState
-          finishingPromise.resolve (finalState.map Except.ok)
+          finishingPromise.resolve <| finalState.map Except.ok
     | .error err =>
       match definition.onError err with
       | some event => flow.emit event
@@ -84,7 +87,7 @@ def init
   pure finishingPromise
 
 def launchReactiveProgram
-    [IOSubscribable f]
+    [IOSubscribable f (Except ε)]
     [Flows.MergeableState σ']
     [ProgramLogger ψ]
     (definition : ReactiveProgramDefinition f ψ σ' ε α)
@@ -95,8 +98,8 @@ def launchReactiveProgram
       definition.initialState
   let result ← IO.wait promise.result?
   match result.bind (·) with
-    | some (.ok state) => pure (some state)
-    | some (.error e) => PredictableProgram.throw e
+    | some <| .ok state => pure <| some state
+    | some <| .error e => PredictableProgram.throw e
     | none => pure none
 
 end ReactiveProgram
