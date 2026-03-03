@@ -25,6 +25,7 @@ namespace ReactiveProgram
 def init
     [IOSubscribable f (Except ε)]
     [Flows.MergeableState σ]
+    [BEq σ]
     [ProgramLogger ψ]
     (definition : ReactiveProgramDefinition f ψ σ ε α)
     : Program ψ σ ε (IO.Promise (Option (Except ε σ))) := do
@@ -52,7 +53,8 @@ def init
     let currentState ← MonadState.get
     let newState := definition.update currentState event
     MonadState.set newState
-    definition.onUpdated newState
+    if newState != currentState then
+      definition.onUpdated newState
     definition.sideEffect event accessor
 
   let readFinalState : IO (Option σ) := do
@@ -89,6 +91,7 @@ def init
 def launchReactiveProgram
     [IOSubscribable f (Except ε)]
     [Flows.MergeableState σ']
+    [BEq σ']
     [ProgramLogger ψ]
     (definition : ReactiveProgramDefinition f ψ σ' ε α)
     : Program ψ σ ε (Option σ') := do
