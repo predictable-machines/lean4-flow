@@ -1,4 +1,4 @@
-import PredictableFlow.Core.Index
+import Flow.Core.Index
 
 namespace Flow.Builders
 

@@ -1,6 +1,6 @@
-import PredictableFlow.Core.Collector
-import PredictableFlow.Core.Flow
-import PredictableFlow.Core.SharedFlow
-import PredictableFlow.Core.StateFlow
-import PredictableFlow.Core.Flows
-import PredictableFlow.Core.ProgramFlow
+import Flow.Core.Collector
+import Flow.Core.Flow
+import Flow.Core.SharedFlow
+import Flow.Core.StateFlow
+import Flow.Core.Flows
+import Flow.Core.ProgramFlow

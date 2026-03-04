@@ -1,3 +1,3 @@
-import PredictableFlow.Builders.FlowBuilders
-import PredictableFlow.Builders.SharedFlowBuilders
-import PredictableFlow.Builders.StateFlowBuilders
+import Flow.Builders.FlowBuilders
+import Flow.Builders.SharedFlowBuilders
+import Flow.Builders.StateFlowBuilders

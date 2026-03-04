@@ -1,4 +1,4 @@
-import PredictableFlow.ReactiveProgram
+import Flow.ReactiveProgram
 
 open Lean
 

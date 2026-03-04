@@ -1,4 +1,4 @@
-import PredictableFlow.Core.StateFlow
+import Flow.Core.StateFlow
 
 namespace Flow.Builders
 

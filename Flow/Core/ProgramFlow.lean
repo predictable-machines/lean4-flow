@@ -1,11 +1,11 @@
-import PredictableFlow.Core.SharedFlow
-import PredictableFlow.Core.Flows
-import PredictableCore.Shared.PredictableProgram
+import Flow.Core.SharedFlow
+import Flow.Core.Flows
+import Flow.Internal.Program
 import Std
 
 namespace Flow.Core
 
-open PredictableCore.Shared
+open Flow.Internal
 
 /-! # ProgramFlow - Hot, multicast streams in PredictableProgram context
 
@@ -124,7 +124,6 @@ def combine
 end ProgramFlow
 
 instance
-  [ProgramLogger ψ]
   [Flows.MergeableState σ]
   [Flows.Combinable ψ]
   : Flows

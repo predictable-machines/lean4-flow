@@ -1,7 +1,7 @@
-import PredictableCore.Shared.Index
-import PredictableFlow.Index
+import Flow.Index
+import Flow.Internal.Index
 
-open PredictableCore.Shared
+open Flow.Internal
 open Flow.Core
 
 structure FlowAccessor (ε α : Type) where
@@ -26,7 +26,6 @@ def init
     [IOSubscribable f (Except ε)]
     [Flows.MergeableState σ]
     [BEq σ]
-    [ProgramLogger ψ]
     (definition : ReactiveProgramDefinition f ψ σ ε α)
     : Program ψ σ ε (IO.Promise (Option (Except ε σ))) := do
   let (flow : ProgramFlow ψ σ ε α) ← ProgramFlow.create (replay := 10)
@@ -92,7 +91,6 @@ def launchReactiveProgram
     [IOSubscribable f (Except ε)]
     [Flows.MergeableState σ']
     [BEq σ']
-    [ProgramLogger ψ]
     (definition : ReactiveProgramDefinition f ψ σ' ε α)
     : Program ψ σ ε (Option σ') := do
   let promise ←
@@ -102,7 +100,7 @@ def launchReactiveProgram
   let result ← IO.wait promise.result?
   match result.bind (·) with
     | some <| .ok state => pure <| some state
-    | some <| .error e => PredictableProgram.throw e
+    | some <| .error e => MonadExcept.throw e
     | none => pure none
 
 end ReactiveProgram

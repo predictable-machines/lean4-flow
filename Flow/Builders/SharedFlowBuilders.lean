@@ -1,4 +1,4 @@
-import PredictableFlow.Core.SharedFlow
+import Flow.Core.SharedFlow
 
 namespace Flow.Builders
 

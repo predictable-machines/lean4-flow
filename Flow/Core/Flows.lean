@@ -1,8 +1,8 @@
-import PredictableFlow.Core.Collector
-import PredictableCore.Shared.PredictableProgram
+import Flow.Core.Collector
+import Flow.Internal.Program
 import Std
 
-open PredictableCore.Shared
+open Flow.Internal
 
 namespace Flow.Core
 
@@ -131,10 +131,6 @@ namespace Flows
 class Combinable (α : Type) where
   combine : α → α → α
 
-/-- Config is left-biased: the first value always wins. -/
-instance : Combinable PredictableConfig where
-  combine c _ := c
-
 /-- Three-way merge for concurrent state updates.
     `merge initial new existing` computes the delta `new - initial` and applies it to `existing`,
     so independent mutations from different callbacks compose correctly. -/
@@ -142,16 +138,6 @@ class MergeableState (α : Type) where
   merge (initial new existing : α) : α
   /-- Strip fields that participate in merging, giving a clean baseline for execution. -/
   withoutMergeable (initial : α) : α
-
-/-- Token-count fields are merged additively; all other fields use `existing` as-is. -/
-instance : MergeableState PredictableState where
-  merge initial new existing :=
-    let inputDelta := new.inputTokens - initial.inputTokens
-    let outputDelta := new.outputTokens - initial.outputTokens
-    { existing with
-      inputTokens := existing.inputTokens + inputDelta
-      outputTokens := existing.outputTokens + outputDelta }
-  withoutMergeable existing := existing
 
 /-- Bridge: run a Program action atomically using shared mutexes.
 

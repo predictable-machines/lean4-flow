@@ -1,12 +1,12 @@
-import PredictableFlow.Core.Collector
-import PredictableFlow.Core.Flow
-import PredictableFlow.Core.Flows
-import PredictableCore.Shared.Uuid
+import Flow.Core.Collector
+import Flow.Core.Flow
+import Flow.Core.Flows
+import Flow.Internal.Uuid
 import Std
 
 namespace Flow.Core
 
-open Core
+open Flow.Internal
 
 /-! # SharedFlow - Hot, multicast streams
 
@@ -58,7 +58,7 @@ inductive SubMsg (α : Type) where
 
 /-- A subscriber backed by a dedicated closeable channel and processing task -/
 structure Subscriber (α : Type) where
-  id : Core.Uuid
+  id : Uuid
   channel : Std.CloseableChannel (SubMsg α)
   task : Task (Except IO.Error Unit)
   bufferSize : Nat
@@ -83,7 +83,7 @@ partial def processingLoop
 
 /-- Create a new subscriber with a dedicated processing task. -/
 def create
-    (id : Core.Uuid)
+    (id : Uuid)
     (action : α → IO Unit)
     (bufferSize : Nat)
     (onBufferOverflow : BufferOverflow)
@@ -163,7 +163,7 @@ namespace SharedFlow
     but can also be called directly if you have the subscriber ID.
     Cancels any pending work for the subscriber before removing it.
 -/
-def unsubscribe (flow : SharedFlow α) (subscriberId : Core.Uuid) : IO Unit :=
+def unsubscribe (flow : SharedFlow α) (subscriberId : Uuid) : IO Unit :=
   flow.state.atomically do
     let state ← get
     match state.subscribers.find? (·.id == subscriberId) with
@@ -180,7 +180,7 @@ def addSubscriber
     (skipReplay : Bool := false)
     : IO (SharedFlowState α × IO Unit) := do
   if state.isClosed then throw (IO.userError "Cannot subscribe to closed SharedFlow")
-  let subscriberId ← Core.Uuid.v4
+  let subscriberId ← Uuid.v4
   let subscriber ← Subscriber.create subscriberId action state.bufferSize state.onBufferOverflow
   unless skipReplay do
     for value in state.replayCache do

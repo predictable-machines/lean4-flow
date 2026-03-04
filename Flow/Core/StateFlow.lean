@@ -1,5 +1,5 @@
-import PredictableFlow.Core.SharedFlow
-import PredictableFlow.Core.Flows
+import Flow.Core.SharedFlow
+import Flow.Core.Flows
 
 namespace Flow.Core
 

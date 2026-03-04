@@ -1,5 +1,5 @@
-import PredictableFlow.Core.Collector
-import PredictableFlow.Core.Flows
+import Flow.Core.Collector
+import Flow.Core.Flows
 
 namespace Flow.Core
 
