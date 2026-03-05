@@ -64,7 +64,7 @@ class Flows
     [MonadLiftT v Option]
     extends DerivedFlow f where
   /-- Register a callback for each emission. Returns a Subscription handle. -/
-  subscribe : f α → (v α → m Unit) → IO (Subscription)
+  subscribe : f α → (v α → m Unit) → IO Subscription
   /-- Drive the flow to completion, blocking until all items are emitted. -/
   flush : f α → m Unit
   /-- Merge two flows into one, tagging emissions with `Sum.inl` / `Sum.inr`. -/
@@ -90,7 +90,7 @@ class Flows
 /-- Subscribe interface with support for a value wrapper `v` (e.g. `Id` or `Except ε`).
     Allows subscribers to handle values and errors through `v α`. -/
 class IOSubscribable (f : Type → Type) (v : outParam (Type → Type)) where
-  subscribe : f α → (v α → IO Unit) → IO (Subscription)
+  subscribe : f α → (v α → IO Unit) → IO Subscription
 
 /-- Any `Flows` instance is automatically `IOSubscribable`. -/
 instance
@@ -106,7 +106,7 @@ instance
 /-- Type-erased subscription handle so heterogeneous source types can share a list.
     `v` comes first so `IOSubscription v` is a proper `Type → Type` for typeclass resolution. -/
 structure IOSubscription (v : Type → Type) (α : Type) where
-  subscribe : (v α → IO Unit) → IO (Subscription)
+  subscribe : (v α → IO Unit) → IO Subscription
 
 instance : IOSubscribable (IOSubscription v) v where
   subscribe sub callback := sub.subscribe callback

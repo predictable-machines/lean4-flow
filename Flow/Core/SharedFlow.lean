@@ -212,7 +212,7 @@ def addSubscriber
     cancel       -- stop subscribing
     ```
 -/
-def subscribe (flow : SharedFlow α) (action : α → IO Unit) : IO (Subscription) :=
+def subscribe (flow : SharedFlow α) (action : α → IO Unit) : IO Subscription :=
   flow.state.atomically do
     let state ← get
     let (newState, subscription) ← addSubscriber flow state action

@@ -53,7 +53,7 @@ def collect (flow : Flow α) (action : α → IO Unit) : IO Unit :=
     collection runs synchronously to completion. This signature enables
     uniform handling with hot streams like SharedFlow.
 -/
-def subscribe (flow : Flow α) (action : α → IO Unit) : IO (Subscription) := do
+def subscribe (flow : Flow α) (action : α → IO Unit) : IO Subscription := do
   flow.collect action
   pure { unsubscribe := pure (), waitForCompletion := pure () }
 
