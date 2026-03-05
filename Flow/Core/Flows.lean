@@ -46,13 +46,13 @@ structure Subscription where
 /-- Typeclass for stream types that can be subscribed to.
 
     Parameterized by:
-    - `F` : the flow type constructor
-    - `M` : the monad for callbacks and flush (e.g. `IO`, `PredictableProgram ε`)
-    - `V` : value wrapper passed to callbacks (e.g. `Id` for plain values, `Except ε` for error-aware)
+    - `f` : the flow type constructor
+    - `m` : the monad for callbacks and flush (e.g. `IO`, `PredictableProgram ε`)
+    - `v` : value wrapper passed to callbacks (e.g. `Id` for plain values, `Except ε` for error-aware)
 
-    `M` and `V` are `outParam`s — inferred automatically from `F`.
+    `m` and `v` are `outParam`s — inferred automatically from `f`.
 
-    Extends `DerivedFlow F` — instances must provide `derive`, which enables default
+    Extends `DerivedFlow f` — instances must provide `derive`, which enables default
     implementations for `map`, `filter`, and `filterMap`.
 -/
 class Flows
@@ -135,19 +135,61 @@ class Combinable (α : Type) where
   combine : α → α → α
 
 /-- Three-way merge for concurrent state updates.
-    `merge initial new existing` computes the delta `new - initial` and applies it to `existing`,
-    so independent mutations from different callbacks compose correctly. -/
+
+    Full example: suppose we have a state type called `MyState` which is
+    `{ errors : List String, toolUsageCount : Nat, name : String }`
+    where `errors` is zeroed by `withEmptyAppendable` and merged by append,
+    `toolUsageCount` is kept by `withEmptyAppendable` and merged by delta,
+    and `name` is not mergeable.
+
+    The instance would be:
+
+    ```
+    instance : MergeableState MyState where
+      merge initial new current :=
+        { current with
+          errors := current.errors ++ new.errors
+          toolUsageCount := current.toolUsageCount + (new.toolUsageCount - initial.toolUsageCount) }
+      withEmptyAppendable s :=
+        { s with errors := [] }
+    ```
+
+    Then the protocol proceeds as:
+
+    1. **Snapshot** the current mutex state as `initial`:
+       `{ errors := ["timeout"], toolUsageCount := 5, name := "app" }`
+    2. **Empty appendable fields** via `withEmptyAppendable initial` to get `baseline`:
+       `{ errors := [], toolUsageCount := 5, name := "app" }`
+    3. **Execute** on the baseline: adds an error and uses a tool twice, producing `new`:
+       `{ errors := ["404"], toolUsageCount := 7, name := "app" }`
+    4. **Meanwhile** another callback mutated the mutex concurrently, so `current` is now:
+       `{ errors := ["timeout", "dns"], toolUsageCount := 8, name := "app" }`
+    5. **Merge** via `merge initial new current`:
+       - `errors`: `current ++ new` → `["timeout", "dns", "404"]`
+       - `toolUsageCount`: `current + (new - initial)` → `8 + 2` → `10`
+       - `name`: unchanged → `"app"`
+
+    Without zeroing `errors`, step 3 would produce `["timeout", "404"]` and
+    the merge would double-count `"timeout"`. `toolUsageCount` doesn't need
+    zeroing because merge already computes its delta from the snapshot. -/
 class MergeableState (α : Type) where
-  merge (initial new existing : α) : α
-  /-- Strip fields that participate in merging, giving a clean baseline for execution. -/
-  withoutMergeable (initial : α) : α
+/-- Combine the caller's mutations into the live state. `initial` is the snapshot taken before
+    execution, `new` is the state after execution, and `current` is the live state (which may
+    have been mutated concurrently). The implementation decides per-field how to reconcile:
+    e.g. append `new` values directly, or compute a delta `new - initial` and apply it. -/
+  merge (initial new current : α) : α
+  /-- Reset fields whose merge strategy takes their new value directly (e.g. append)
+      to their identity element, so mutations after the reset represent only the caller's
+      own contribution. Fields where `merge` computes a delta (e.g. `new - initial`) can
+      keep their snapshot value. -/
+  withEmptyAppendable (initial : α) : α
 
 /-- Bridge: run a Program action atomically using shared mutexes.
 
     Three-phase protocol:
     1. **Snapshot**: atomically read current state from the primary mutex
     2. **Execute**: run the program with a clean copy of the snapshot
-       (non-mergeable fields stripped via `MergeableState.withoutMergeable`)
+       (non-mergeable fields stripped via `MergeableState.withEmptyAppendable`)
     3. **Merge**: atomically combine the program's new state into
        every mutex's current state via `MergeableState.merge`
 
@@ -175,7 +217,7 @@ def withStateSync
     -- proof term h' for the initialStates[0] index below.
     if h' : 0 < initialStates.size then
       let (result, newState) ←
-        Program.run program config (MergeableState.withoutMergeable initialStates[0])
+        Program.run program config (MergeableState.withEmptyAppendable initialStates[0])
 
       for (idx, mutex) in mutexes.mapIdx (·,·) do
         if h'' : idx < initialStates.size then
