@@ -31,13 +31,13 @@ def init
   let (flow : ProgramFlow ψ σ ε α) ← ProgramFlow.create (replay := 10)
 
   for source in definition.sources do
-    let close ← IOSubscribable.subscribe source fun exceptVal =>
+    let sub ← IOSubscribable.subscribe source fun exceptVal =>
       match exceptVal with
       | Except.ok a => flow.emit a
       | Except.error e => flow.emitError e
     flow.underlying.state.atomically do
       let state ← get
-      set { state with closeActions := state.closeActions.push close }
+      set { state with closeActions := state.closeActions.push sub.unsubscribe }
 
   flow.underlying.state.atomically do
     let state ← get
@@ -64,7 +64,7 @@ def init
 
   let finishingPromise ← IO.Promise.new (α := Option (Except ε σ))
 
-  let _ ← flow.underlying.subscribe fun (exceptVal : Except ε α) => do
+  let _ ← SharedFlow.subscribe flow.underlying.toSharedFlow fun (exceptVal : Except ε α) => do
     match exceptVal with
     | .ok event =>
       let result ← Flows.withStateSync flow.stateMutexes flow.config (processMsg event)

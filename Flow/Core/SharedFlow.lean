@@ -61,6 +61,7 @@ structure Subscriber (α : Type) where
   id : Uuid
   channel : Std.CloseableChannel (SubMsg α)
   task : Task (Except IO.Error Unit)
+  completion : IO.Promise Unit
   bufferSize : Nat
   onBufferOverflow : BufferOverflow
 
@@ -89,8 +90,11 @@ def create
     (onBufferOverflow : BufferOverflow)
     : IO (Subscriber α) := do
   let channel ← Std.CloseableChannel.new (α := SubMsg α)
-  let task ← IO.asTask (prio := .default) (processingLoop channel.sync action)
-  pure { id, channel, task, bufferSize, onBufferOverflow }
+  let completion ← IO.Promise.new (α := Unit)
+  let task ← IO.asTask (prio := .default) do
+    processingLoop channel.sync action
+    IO.Promise.resolve () completion
+  pure { id, channel, task, completion, bufferSize, onBufferOverflow }
 
 /-- Send a value to the subscriber's channel. No-op if channel is closed. -/
 def enqueue (sub : Subscriber α) (value : α) : IO Unit :=
@@ -172,13 +176,13 @@ def unsubscribe (flow : SharedFlow α) (subscriberId : Uuid) : IO Unit :=
     set { state with subscribers := state.subscribers.filter (·.id != subscriberId) }
 
 /-- Create and register a subscriber without acquiring the mutex.
-    Caller must hold the mutex. Returns updated state and a cancellation function. -/
+    Caller must hold the mutex. Returns updated state and a Subscription handle. -/
 def addSubscriber
     (flow : SharedFlow α)
     (state : SharedFlowState α)
     (action : α → IO Unit)
     (skipReplay : Bool := false)
-    : IO (SharedFlowState α × IO Unit) := do
+    : IO (SharedFlowState α × Subscription Unit) := do
   if state.isClosed then throw (IO.userError "Cannot subscribe to closed SharedFlow")
   let subscriberId ← Uuid.v4
   let subscriber ← Subscriber.create subscriberId action state.bufferSize state.onBufferOverflow
@@ -188,7 +192,11 @@ def addSubscriber
   let newState := { state with
     subscribers := state.subscribers.push subscriber
     closeActions := state.closeActions.push subscriber.close }
-  pure (newState, flow.unsubscribe subscriberId)
+  let subscription : Subscription Unit :=
+    { unsubscribe := flow.unsubscribe subscriberId
+      waitForCompletion := do
+        let _ ← IO.wait subscriber.completion.result! }
+  pure (newState, subscription)
 
 /-- Subscribe to emissions from a SharedFlow. Returns a cancellation function.
 
@@ -204,12 +212,12 @@ def addSubscriber
     cancel       -- stop subscribing
     ```
 -/
-def subscribe (flow : SharedFlow α) (action : α → IO Unit) : IO (IO Unit) :=
+def subscribe (flow : SharedFlow α) (action : α → IO Unit) : IO (Subscription Unit) :=
   flow.state.atomically do
     let state ← get
-    let (newState, cancel) ← addSubscriber flow state action
+    let (newState, subscription) ← addSubscriber flow state action
     set newState
-    pure cancel
+    pure subscription
 
 /-- Get the number of active subscribers -/
 def subscriberCount (flow : SharedFlow α) : IO Nat :=
@@ -401,26 +409,28 @@ instance : DerivedFlow MutableSharedFlow where
 
 instance : Flows SharedFlow IO Id where
   combine := SharedFlow.combine
-  subscribe := SharedFlow.subscribe
+  subscribe := fun flow action => SharedFlow.subscribe flow (action ·)
   flush := SharedFlow.flush
   toList := fun flow => do
     let list ← IO.mkRef ([] : List _)
     -- `Id` is @[reducible] so Lean reduces `a : Id α` to `α` in the callback,
     -- but the list ref keeps type `List (Id α)` from the return type, causing an
     -- HAppend mismatch. Annotating `a : Id _` preserves the wrapper so both sides match.
-    let _ ← SharedFlow.subscribe flow fun (a : Id _) => list.modify (a :: ·)
+    let sub ← SharedFlow.subscribe flow fun (a : Id _) => list.modify (a :: ·)
     SharedFlow.flush flow
+    sub.unsubscribe
     (← list.get).reverse |> pure
 
 instance : Flows MutableSharedFlow IO Id where
   combine := MutableSharedFlow.combine
-  subscribe := (SharedFlow.subscribe ·.toSharedFlow)
+  subscribe := fun flow action => SharedFlow.subscribe flow.toSharedFlow (action ·)
   flush := (SharedFlow.flush ·.toSharedFlow)
   toList := fun flow => do
     let list ← IO.mkRef ([] : List _)
     -- See SharedFlow instance above for why `Id _` annotation is needed.
-    let _ ← SharedFlow.subscribe flow.toSharedFlow fun (a : Id _) => list.modify (a :: ·)
+    let sub ← SharedFlow.subscribe flow.toSharedFlow fun (a : Id _) => list.modify (a :: ·)
     SharedFlow.flush flow.toSharedFlow
+    sub.unsubscribe
     (← list.get).reverse |> pure
 
 end Flow.Core

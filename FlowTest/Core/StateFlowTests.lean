@@ -53,10 +53,10 @@ def testCancellationStopsReceivingValues : IO Unit := do
   flow.flush
   flow.emit 10
   flow.flush
-  cancel2
+  cancel2.unsubscribe
   flow.emit 20
   flow.flush
-  cancel3
+  cancel3.unsubscribe
   flow.emit 30
   flow.flush
   let vals1 ← consumer1Values.get
@@ -83,7 +83,7 @@ def testSubscriberCountTracking : IO Unit := do
   let cancel ← flow.subscribe fun _ => pure ()
   let count1 ← flow.subscriberCount
   count1 |> shouldEqual 1
-  cancel
+  cancel.unsubscribe
   let count2 ← flow.subscriberCount
   count2 |> shouldEqual 0
   flow.close

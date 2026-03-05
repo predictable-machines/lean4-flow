@@ -21,10 +21,10 @@ def testMultipleConsumersAndCancellation : IO Unit := do
 
   flow.emit 10
   flow.flush
-  cancel2
+  cancel2.unsubscribe
   flow.emit 20
   flow.flush
-  cancel3
+  cancel3.unsubscribe
   flow.emit 30
   flow.flush
 
@@ -63,7 +63,7 @@ def testSubscriberCountTracking : IO Unit := do
   let count1 ← flow.subscriberCount
   count1 |> shouldEqual 1
 
-  cancel
+  cancel.unsubscribe
   let count2 ← flow.subscriberCount
   count2 |> shouldEqual 0
   flow.close

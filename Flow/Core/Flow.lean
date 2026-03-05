@@ -43,19 +43,19 @@ namespace Flow
 
 /-- Collect values from a flow with an action.
     This is a terminal operation that triggers flow execution. -/
-def forEach (flow : Flow α) (action : α → IO Unit) : IO Unit :=
+def collect (flow : Flow α) (action : α → IO Unit) : IO Unit :=
   match flow with
   | .mk block => block (Collector.fromAction action)
 
-/-- Subscribe to a flow with an action. Returns a cancellation function.
+/-- Subscribe to a flow with an action. Returns a Subscription handle.
 
-    For cold flows, the cancellation is a no-op since collection runs
-    synchronously to completion. This signature enables uniform handling
-    with hot streams like SharedFlow.
+    For cold flows, unsubscribe and waitForCompletion are no-ops since
+    collection runs synchronously to completion. This signature enables
+    uniform handling with hot streams like SharedFlow.
 -/
-def subscribe (flow : Flow α) (action : α → IO Unit) : IO (IO Unit) := do
-  flow.forEach action
-  pure (pure ())
+def subscribe (flow : Flow α) (action : α → IO Unit) : IO (Subscription Unit) := do
+  flow.collect action
+  pure { unsubscribe := pure (), waitForCompletion := pure () }
 
 /-- Collect with an explicit collector -/
 def collectWith (flow : Flow α) (collector : Collector α) : IO Unit :=
@@ -73,14 +73,14 @@ def combine (flow1 : Flow α) (flow2 : Flow β) : IO (Flow (Sum α β)) :=
 /-- Fold all emissions into an accumulator. -/
 def fold (flow : Flow α) (f : β → α → β) (init : β) : IO β := do
   let acc ← IO.mkRef init
-  flow.forEach fun a => acc.modify (f · a)
+  flow.collect fun a => acc.modify (f · a)
   acc.get
 
 /-- Find the first emission matching a predicate.
     Does not short-circuit the source; remaining emissions are ignored. -/
 def find (flow : Flow α) (pred : α → Bool) : IO (Option α) := do
   let result ← IO.mkRef (none : Option α)
-  flow.forEach fun a => do
+  flow.collect fun a => do
     if (← result.get).isNone && pred a then
       result.set (some a)
   result.get
@@ -93,7 +93,7 @@ def any (flow : Flow α) (pred : α → Bool) : IO Bool := do
     Returns `true` for an empty flow. -/
 def all (flow : Flow α) (pred : α → Bool) : IO Bool := do
   let failed ← IO.mkRef false
-  flow.forEach fun a => do
+  flow.collect fun a => do
     if !(← failed.get) && !pred a then
       failed.set true
   (← failed.get) |> (!·) |> pure
@@ -107,7 +107,7 @@ def count (flow : Flow α) : IO Nat :=
 def take (flow : Flow α) (n : Nat) : Flow α :=
   Flow.mk fun collector => do
     let counter ← IO.mkRef 0
-    flow.forEach fun a => do
+    flow.collect fun a => do
       let c ← counter.get
       if c < n then
         collector.emit a
@@ -130,7 +130,7 @@ instance : DerivedFlow Flow where
 
 instance : Flows Flow IO Id where
   combine := Flow.combine
-  subscribe := Flow.subscribe
+  subscribe := fun flow action => Flow.subscribe flow (action ·)
   flush := Flow.flush
 
 /-- BEq instance for Id: since Id is the identity, delegate to inner type -/

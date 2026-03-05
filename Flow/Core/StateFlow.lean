@@ -89,15 +89,16 @@ instance : DerivedFlow StateFlow where
 
 instance : Flows StateFlow IO Id where
   combine := StateFlow.combine
-  subscribe := (·.sharedFlow.subscribe)
+  subscribe := fun flow action => SharedFlow.subscribe flow.sharedFlow (action ·)
   flush := StateFlow.flush
   toList := fun flow => do
     let list ← IO.mkRef ([] : List _)
     -- `Id` is @[reducible] so Lean reduces `a : Id α` to `α` in the callback,
     -- but the list ref keeps type `List (Id α)` from the return type, causing an
     -- HAppend mismatch. Annotating `a : Id _` preserves the wrapper so both sides match.
-    let _ ← flow.sharedFlow.subscribe fun (a : Id _) => list.modify (a :: ·)
+    let sub ← flow.sharedFlow.subscribe fun (a : Id _) => list.modify (a :: ·)
     StateFlow.flush flow
+    sub.unsubscribe
     (← list.get).reverse |> pure
 
 /-- Mutable StateFlow that can update its value.
@@ -227,17 +228,15 @@ def flush (flow : MutableStateFlow α) : IO Unit :=
 
 /-- Subscribe to value updates. Returns a cancellation function.
 
-    Unlike `forEach`, this keeps the subscription active until cancelled.
-
     Example:
     ```lean
     let state ← MutableStateFlow.create 0
-    let cancel ← state.subscribe IO.println
+    let sub ← state.subscribe IO.println
     state.emit 42  -- subscriber receives 42
-    cancel  -- stop receiving updates
+    sub.unsubscribe  -- stop receiving updates
     ```
 -/
-def subscribe (flow : MutableStateFlow α) (action : α → IO Unit) : IO (IO Unit) :=
+def subscribe (flow : MutableStateFlow α) (action : α → IO Unit) : IO (Subscription Unit) :=
   flow.mutableSharedFlow.subscribe action
 
 def filter (flow : MutableStateFlow α) (pred : α → Bool) : IO (MutableStateFlow α) := do
@@ -286,13 +285,14 @@ instance : DerivedFlow MutableStateFlow where
 instance : Flows MutableStateFlow IO Id where
   filter := MutableStateFlow.filter
   combine := MutableStateFlow.combine
-  subscribe := (·.mutableSharedFlow.subscribe)
+  subscribe := fun flow action => SharedFlow.subscribe flow.mutableSharedFlow.toSharedFlow (action ·)
   flush := (·.mutableSharedFlow.flush)
   toList := fun flow => do
     let list ← IO.mkRef ([] : List _)
     -- See StateFlow instance above for why `Id _` annotation is needed.
-    let _ ← flow.mutableSharedFlow.subscribe fun (a : Id _) => list.modify (a :: ·)
+    let sub ← SharedFlow.subscribe flow.mutableSharedFlow.toSharedFlow fun (a : Id _) => list.modify (a :: ·)
     flow.mutableSharedFlow.flush
+    sub.unsubscribe
     (← list.get).reverse |> pure
 
 end Flow.Core

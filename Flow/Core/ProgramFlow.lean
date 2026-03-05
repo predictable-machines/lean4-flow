@@ -94,8 +94,8 @@ def subscribe
     [inst : Flows.MergeableState σ]
     (flow : ProgramFlow ψ σ ε α)
     (action : Except ε α → Program ψ σ ε Unit)
-    : IO (IO Unit) := do
-  flow.underlying.subscribe fun exceptVal => do
+    : IO (Subscription Unit) := do
+  SharedFlow.subscribe flow.underlying.toSharedFlow fun exceptVal => do
     let _ ← Flows.withStateSync flow.stateMutexes flow.config (action exceptVal)
     pure ()
 
@@ -131,7 +131,9 @@ instance
       (Program ψ σ ε)
       (Except ε) where
   combine := ProgramFlow.combine
-  subscribe := fun flow action => ProgramFlow.subscribe flow action
+  subscribe := fun flow action => do
+    let sub ← ProgramFlow.subscribe flow action
+    pure { unsubscribe := sub.unsubscribe, waitForCompletion := sub.waitForCompletion }
   flush := ProgramFlow.flush
 
 end Flow.Core
