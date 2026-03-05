@@ -11,8 +11,9 @@ Extracted from [predictable-code](https://github.com/predictable-machines/predic
 Uses Lake build system, targeting Lean v4.28.0 (pinned in `lean-toolchain`).
 
 ```bash
-lake build        # Build library
-lake build tests  # Build and run tests
+make              # Build library
+make test         # Build and run tests
+make rebuild      # Clean and rebuild
 ```
 
 ## Architecture
