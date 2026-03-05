@@ -64,7 +64,7 @@ def init
 
   let finishingPromise ← IO.Promise.new (α := Option (Except ε σ))
 
-  let _ ← SharedFlow.subscribe flow.underlying.toSharedFlow fun (exceptVal : Except ε α) => do
+  discard <| SharedFlow.subscribe flow.underlying.toSharedFlow fun (exceptVal : Except ε α) => do
     match exceptVal with
     | .ok event =>
       let result ← Flows.withStateSync flow.stateMutexes flow.config (processMsg event)

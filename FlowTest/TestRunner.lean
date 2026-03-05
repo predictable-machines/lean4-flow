@@ -26,7 +26,7 @@ def run (tests : List (String × IO Unit)) (timeoutMs : Nat := 50) : IO Unit := 
       catch e =>
         promise.resolve (.inl (some (toString e)))
     if timeoutMs > 0 then
-      let _ ← IO.asTask (prio := .dedicated) do
+      discard <| IO.asTask (prio := .dedicated) do
         IO.sleep timeoutMs.toUInt32
         promise.resolve (.inr ())
     let result ← IO.wait promise.result!

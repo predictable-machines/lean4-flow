@@ -106,7 +106,7 @@ def flush (sub : Subscriber α) : IO Unit := do
   let promise ← IO.Promise.new (α := Unit)
   let sent ← (sub.channel.sync.send (.flush promise) *> pure true).catchExceptions fun _ => pure false
   if sent then
-    let _ ← IO.wait promise.result!
+    discard <| IO.wait promise.result!
 
 /-- Close the channel, which terminates the processing loop. -/
 def close (sub : Subscriber α) : IO Unit :=

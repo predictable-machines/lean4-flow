@@ -96,7 +96,7 @@ def subscribe
     (action : Except ε α → Program ψ σ ε Unit)
     : IO (Subscription) := do
   SharedFlow.subscribe flow.underlying.toSharedFlow fun exceptVal => do
-    let _ ← Flows.withStateSync flow.stateMutexes flow.config (action exceptVal)
+    discard <| Flows.withStateSync flow.stateMutexes flow.config (action exceptVal)
     pure ()
 
 def flush (flow : ProgramFlow ψ σ ε α) : Program ψ σ ε Unit := do

@@ -61,7 +61,7 @@ def testWaitForCompletionBlocksUntilSubscriberTaskEnds : IO Unit := do
   let sub ← SharedFlow.subscribe flow.toSharedFlow fun v =>
     values.modify (v :: ·)
   -- Spawn a task that waits 5ms then closes the flow
-  let _ ← IO.asTask do
+  discard <|IO.asTask do
     IO.sleep 1
     flow.emit 1
     flow.emit 2
@@ -95,7 +95,7 @@ def testProgramFlowCurrentStateAfterCompletion : IO Unit := do
   match result with
   | (.ok (flow, sub), _) =>
     flow.emit 42
-    let _ ← IO.asTask do
+    discard <|IO.asTask do
       IO.sleep 1
       flow.close
     sub.waitForCompletion
