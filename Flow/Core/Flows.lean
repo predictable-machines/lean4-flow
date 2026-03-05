@@ -101,7 +101,7 @@ instance
     : IOSubscribable f v where
   subscribe flow callback := do
     let sub ← Flows.subscribe flow fun va => MonadLiftT.monadLift (callback va)
-    pure { unsubscribe := sub.unsubscribe, waitForCompletion := sub.waitForCompletion }
+    pure sub
 
 /-- Type-erased subscription handle so heterogeneous source types can share a list.
     `v` comes first so `IOSubscription v` is a proper `Type → Type` for typeclass resolution. -/
@@ -126,7 +126,7 @@ def IOSubscribable.mapped
         match transform vb with
         | some a => callback a
         | none => pure ()
-      pure { unsubscribe := sub.unsubscribe, waitForCompletion := sub.waitForCompletion } }
+      pure sub }
 
 namespace Flows
 

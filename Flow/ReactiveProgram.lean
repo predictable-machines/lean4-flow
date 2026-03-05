@@ -56,9 +56,6 @@ def init
       definition.onUpdated newState
     definition.sideEffect event accessor
 
-  let readFinalState : IO σ :=
-    flow.stateMutexes.val[0]'flow.stateMutexes.property |>.atomically do return ← get
-
   let finishingPromise ← IO.Promise.new (α := Option (Except ε σ))
 
   discard <| flow.underlying.toSharedFlow.subscribe fun (exceptVal : Except ε α) => do
@@ -71,7 +68,7 @@ def init
         flow.close
       | .ok () =>
         if ← flow.isClosed then
-          let finalState ← readFinalState
+          let finalState ← flow.currentState
           finishingPromise.resolve <| some <| Except.ok finalState
     | .error err =>
       match definition.onError err with
