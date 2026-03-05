@@ -1,14 +1,27 @@
 name: CI
+
 on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+
 jobs:
-  build:
+  build-and-test:
+    if: github.event.pull_request.draft == false
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+
     steps:
       - uses: actions/checkout@v4
+
       - uses: leanprover/lean-action@v1
+        name: Setup Lean
         with:
-          build: true
+          build: false
+
+      - name: Build
+        run: make build
+
+      - name: Unit tests
+        run: make test
