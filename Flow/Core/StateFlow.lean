@@ -31,7 +31,7 @@ stateFlow.collect { println(it) }
 let stateFlow ← MutableStateFlow.create 0
 let v ← stateFlow.value  -- 0
 stateFlow.emit 42
-let cancel ← stateFlow.subscribe IO.println
+let subscription ← stateFlow.subscribe IO.println
 ```
 
 ## Key Properties
@@ -149,7 +149,7 @@ def create
     Example:
     ```lean
     let flow ← MutableStateFlow.create 0
-    let cancel ← flow.subscribe IO.println
+    let subscription ← flow.subscribe IO.println
     flow.emit 42  -- prints "42"
     ```
 -/
@@ -226,7 +226,7 @@ def toStateFlow (flow : MutableStateFlow α) : StateFlow α :=
 def flush (flow : MutableStateFlow α) : IO Unit :=
   flow.toStateFlow.flush
 
-/-- Subscribe to value updates. Returns a cancellation function.
+/-- Subscribe to value updates. Returns a Subscription handle.
 
     Example:
     ```lean

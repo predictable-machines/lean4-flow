@@ -34,7 +34,7 @@ val job = sharedFlow.subscribe { println(it) }
 -- Lean
 let sharedFlow ← MutableSharedFlow.create (replay := 2)
 sharedFlow.emit 1
-let cancel ← sharedFlow.subscribe IO.println
+let subscription ← sharedFlow.subscribe IO.println
 ```
 
 ## Concurrency
@@ -163,7 +163,7 @@ namespace SharedFlow
 
 /-- Unsubscribe a subscriber by their ID.
 
-    This is typically called via the cancellation function returned by `subscribe`,
+    This is typically called via `Subscription.unsubscribe` returned by `subscribe`,
     but can also be called directly if you have the subscriber ID.
     Cancels any pending work for the subscriber before removing it.
 -/
@@ -198,18 +198,18 @@ def addSubscriber
         let _ ← IO.wait subscriber.completion.result! }
   pure (newState, subscription)
 
-/-- Subscribe to emissions from a SharedFlow. Returns a cancellation function.
+/-- Subscribe to emissions from a SharedFlow. Returns a Subscription handle.
 
     This is the main way to consume a SharedFlow. The action is called for
-    each emission until you invoke the returned cancellation function.
+    each emission until you invoke `unsubscribe` on the returned handle.
 
     Example:
     ```lean
     let flow ← MutableSharedFlow.create (α := Nat)
-    let cancel ← flow.subscribe IO.println
+    let subscription ← flow.subscribe IO.println
     flow.emit 1  -- prints "1"
     flow.emit 2  -- prints "2"
-    cancel       -- stop subscribing
+    subscription.unsubscribe  -- stop subscribing
     ```
 -/
 def subscribe (flow : SharedFlow α) (action : α → IO Unit) : IO Subscription :=
@@ -287,8 +287,8 @@ def create
     Example:
     ```lean
     let flow ← MutableSharedFlow.create (α := String)
-    let cancel1 ← flow.subscribe IO.println
-    let cancel2 ← flow.subscribe (fun s => IO.println s!"Sub2: {s}")
+    let subscription1 ← flow.subscribe IO.println
+    let subscription2 ← flow.subscribe (fun s => IO.println s!"Sub2: {s}")
     flow.emit "Hello"  -- both subscribers receive "Hello"
     ```
 -/

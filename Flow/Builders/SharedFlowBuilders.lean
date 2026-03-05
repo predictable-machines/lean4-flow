@@ -41,12 +41,12 @@ def sharedFlow (α : Type) : IO (MutableSharedFlow α) :=
     Example:
     ```lean
     let flow ← sharedFlowWithReplay 2 (α := Int)
-    let cancel ← flow.subscribe IO.println
+    let subscription ← flow.subscribe IO.println
     flow.emit 1
     flow.emit 2
     flow.emit 3
     -- New subscriber will receive [2, 3] (last 2 values)
-    let cancel2 ← flow.subscribe (fun x => IO.println s!"New: {x}")
+    let subscription2 ← flow.subscribe (fun x => IO.println s!"New: {x}")
     ```
 -/
 def sharedFlowWithReplay (replay : Nat) (α : Type) : IO (MutableSharedFlow α) :=

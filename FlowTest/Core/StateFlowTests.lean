@@ -46,17 +46,17 @@ def testCancellationStopsReceivingValues : IO Unit := do
   let consumer3Values ← IO.mkRef ([] : List Nat)
   discard <|flow.subscribe fun v => do
     consumer1Values.modify (v :: ·)
-  let cancel2 ← flow.subscribe fun v => do
+  let subscription2 ← flow.subscribe fun v => do
     consumer2Values.modify (v :: ·)
-  let cancel3 ← flow.subscribe fun v => do
+  let subscription3 ← flow.subscribe fun v => do
     consumer3Values.modify (v :: ·)
   flow.flush
   flow.emit 10
   flow.flush
-  cancel2.unsubscribe
+  subscription2.unsubscribe
   flow.emit 20
   flow.flush
-  cancel3.unsubscribe
+  subscription3.unsubscribe
   flow.emit 30
   flow.flush
   let vals1 ← consumer1Values.get
@@ -80,10 +80,10 @@ def testSubscriberCountTracking : IO Unit := do
   let flow ← MutableStateFlow.create (some 0)
   let count0 ← flow.subscriberCount
   count0 |> shouldEqual 0
-  let cancel ← flow.subscribe fun _ => pure ()
+  let subscription ← flow.subscribe fun _ => pure ()
   let count1 ← flow.subscriberCount
   count1 |> shouldEqual 1
-  cancel.unsubscribe
+  subscription.unsubscribe
   let count2 ← flow.subscriberCount
   count2 |> shouldEqual 0
   flow.close
