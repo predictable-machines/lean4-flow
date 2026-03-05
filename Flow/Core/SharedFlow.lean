@@ -93,7 +93,7 @@ def create
   let completion ← IO.Promise.new (α := Unit)
   let task ← IO.asTask (prio := .default) do
     processingLoop channel.sync action
-    IO.Promise.resolve () completion
+    completion.resolve ()
   pure { id, channel, task, completion, bufferSize, onBufferOverflow }
 
 /-- Send a value to the subscriber's channel. No-op if channel is closed. -/
