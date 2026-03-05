@@ -25,9 +25,13 @@ Type parameters:
 - `α`: value type
 -/
 
+/-- Subscription handle for ProgramFlow that also provides access to the current state. -/
+structure ProgramFlowSubscription (σ : Type) extends Subscription where
+  currentState : IO σ
+
 structure ProgramFlow (ψ σ ε α : Type) where
   underlying : MutableSharedFlow (Except ε α)
-  stateMutexes : Array (Std.Mutex σ)
+  stateMutexes : { arr : Array (Std.Mutex σ) // 0 < arr.size }
   config : ψ
 
 instance
@@ -56,7 +60,7 @@ def create
     (bufferSize := bufferSize)
     (onBufferOverflow := onBufferOverflow)
   let stateMutex ← Std.Mutex.new state
-  pure { underlying, stateMutexes := #[stateMutex], config }
+  pure { underlying, stateMutexes := ⟨#[stateMutex], by simp⟩, config }
 
 def liftShared
     (shared : MutableSharedFlow α)
@@ -65,7 +69,7 @@ def liftShared
   let config ← read
   let stateMutex ← Std.Mutex.new state
   let underlying ← Flows.map shared (Except.ok ·)
-  pure { underlying, stateMutexes := #[stateMutex], config }
+  pure { underlying, stateMutexes := ⟨#[stateMutex], by simp⟩, config }
 
 
 def emit (flow : ProgramFlow ψ σ ε α) (value : α) : IO Unit :=
@@ -90,20 +94,24 @@ def isClosed (flow : ProgramFlow ψ σ ε α) : IO Bool :=
 def subscriberCount (flow : ProgramFlow ψ σ ε α) : IO Nat :=
   flow.underlying.subscriberCount
 
+/-- Read the current state from the primary mutex. -/
+def currentState (flow : ProgramFlow ψ σ ε α) : IO σ :=
+  flow.stateMutexes.val[0]'flow.stateMutexes.property |>.atomically do return ← get
+
 def subscribe
     [inst : Flows.MergeableState σ]
     (flow : ProgramFlow ψ σ ε α)
     (action : Except ε α → Program ψ σ ε Unit)
-    : IO Subscription := do
-  SharedFlow.subscribe flow.underlying.toSharedFlow fun exceptVal => do
-    discard <| Flows.withStateSync flow.stateMutexes flow.config (action exceptVal)
+    : IO (ProgramFlowSubscription σ) := do
+  let sub ← SharedFlow.subscribe flow.underlying.toSharedFlow fun exceptVal => do
+    discard <| Flows.withStateSync flow.stateMutexes.val flow.config (action exceptVal)
     pure ()
+  pure { toSubscription := sub, currentState := flow.currentState }
 
 def flush (flow : ProgramFlow ψ σ ε α) : Program ψ σ ε Unit := do
   flow.underlying.flush
-  if h : 0 < flow.stateMutexes.size then
-    let updatedState ← flow.stateMutexes[0].atomically do return ← get
-    MonadState.set updatedState
+  let updatedState ← flow.stateMutexes.val[0]'flow.stateMutexes.property |>.atomically do return ← get
+  MonadState.set updatedState
 
 def combine
     [Flows.Combinable ψ]
@@ -118,16 +126,10 @@ def combine
     | .inr (.error e) => Except.error e)
   pure
     { underlying := result
-      stateMutexes := flow1.stateMutexes ++ flow2.stateMutexes
+      stateMutexes := ⟨flow1.stateMutexes.val ++ flow2.stateMutexes.val, by
+        have := flow1.stateMutexes.property
+        simp [Array.size_append]; omega⟩
       config := Flows.Combinable.combine flow1.config flow2.config }
-
-/-- Read the current state from the primary mutex.
-    Returns `none` if the flow has no state mutexes. -/
-def currentState (flow : ProgramFlow ψ σ ε α) : IO (Option σ) :=
-  if h : 0 < flow.stateMutexes.size then
-    flow.stateMutexes[0].atomically do return ← get
-  else
-    pure none
 
 end ProgramFlow
 
@@ -141,7 +143,7 @@ instance
   combine := ProgramFlow.combine
   subscribe := fun flow action => do
     let sub ← ProgramFlow.subscribe flow action
-    pure { unsubscribe := sub.unsubscribe, waitForCompletion := sub.waitForCompletion }
+    pure sub.toSubscription
   flush := ProgramFlow.flush
 
 end Flow.Core

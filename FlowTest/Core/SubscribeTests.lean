@@ -100,7 +100,7 @@ def testProgramFlowCurrentStateAfterCompletion : IO Unit := do
       flow.close
     sub.waitForCompletion
     let finalState ← flow.currentState
-    finalState |> shouldBeSome 42
+    finalState |> shouldEqual 42
   | (.error e, _) => nomatch e
 
 def allTests : List (String × IO Unit) :=
