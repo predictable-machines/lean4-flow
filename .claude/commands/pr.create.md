@@ -2,6 +2,9 @@
 
 Create a pull request for the current branch.
 
+Arguments: $ARGUMENTS
+- If arguments contain "draft" (e.g., "draft"), create the PR as a draft by adding `--draft` to the `gh pr create` command.
+
 ## Step 1: Check Current State
 
 Get the current branch and verify it's not main:
