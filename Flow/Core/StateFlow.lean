@@ -236,7 +236,7 @@ def flush (flow : MutableStateFlow α) : IO Unit :=
     sub.unsubscribe  -- stop receiving updates
     ```
 -/
-def subscribe (flow : MutableStateFlow α) (action : α → IO Unit) : IO (Subscription Unit) :=
+def subscribe (flow : MutableStateFlow α) (action : α → IO Unit) : IO (Subscription) :=
   flow.mutableSharedFlow.subscribe action
 
 def filter (flow : MutableStateFlow α) (pred : α → Bool) : IO (MutableStateFlow α) := do

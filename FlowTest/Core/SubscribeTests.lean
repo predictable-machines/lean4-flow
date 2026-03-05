@@ -2,7 +2,7 @@ import Flow
 import FlowTest.FlowTestDataBuilder
 import FlowTest.Assertions
 
-open Flow.Core Flow.Builders
+open Flow.Core Flow.Builders Flow.Internal
 
 namespace SubscribeTests
 
@@ -81,6 +81,28 @@ def testWaitForCompletionOnColdFlow : IO Unit := do
   sub.waitForCompletion
   (← count.get) |> shouldEqual 3
 
+instance : Flows.MergeableState Nat where
+  merge initial new existing := existing + (new - initial)
+  withoutMergeable _ := 0
+
+def testProgramFlowCurrentStateAfterCompletion : IO Unit := do
+  let result ← Program.run (ψ := Unit) (ε := Empty) (σ := Nat) (do
+    let flow ← ProgramFlow.create (α := Nat) (replay := 10)
+    let sub ← ProgramFlow.subscribe flow fun
+      | .ok n => MonadState.set n
+      | .error e => nomatch e
+    pure (flow, sub)) () 0
+  match result with
+  | (.ok (flow, sub), _) =>
+    flow.emit 42
+    let _ ← IO.asTask do
+      IO.sleep 1
+      flow.close
+    sub.waitForCompletion
+    let finalState ← flow.currentState
+    finalState |> shouldBeSome 42
+  | (.error e, _) => nomatch e
+
 def allTests : List (String × IO Unit) :=
   [ ("subscribe: calls callback for each element (Flow)", testSubscribeCallsCallbackForEachElement_Flow),
     ("subscribe: calls callback for each element (SharedFlow)", testSubscribeCallsCallbackForEachElement_SharedFlow),
@@ -88,6 +110,7 @@ def allTests : List (String × IO Unit) :=
     ("subscribe: combine with empty first flow", testCombineWithEmptyFlows),
     ("subscribe: returns Subscription with unsubscribe", testSubscribeReturnsSubscriptionWithUnsubscribe),
     ("subscribe: waitForCompletion blocks until subscriber task ends", testWaitForCompletionBlocksUntilSubscriberTaskEnds),
-    ("subscribe: waitForCompletion on cold flow is no-op", testWaitForCompletionOnColdFlow) ]
+    ("subscribe: waitForCompletion on cold flow is no-op", testWaitForCompletionOnColdFlow),
+    ("subscribe: ProgramFlow currentState returns final state after completion", testProgramFlowCurrentStateAfterCompletion) ]
 
 end SubscribeTests

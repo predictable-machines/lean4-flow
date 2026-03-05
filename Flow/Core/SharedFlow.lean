@@ -182,7 +182,7 @@ def addSubscriber
     (state : SharedFlowState α)
     (action : α → IO Unit)
     (skipReplay : Bool := false)
-    : IO (SharedFlowState α × Subscription Unit) := do
+    : IO (SharedFlowState α × Subscription) := do
   if state.isClosed then throw (IO.userError "Cannot subscribe to closed SharedFlow")
   let subscriberId ← Uuid.v4
   let subscriber ← Subscriber.create subscriberId action state.bufferSize state.onBufferOverflow
@@ -192,7 +192,7 @@ def addSubscriber
   let newState := { state with
     subscribers := state.subscribers.push subscriber
     closeActions := state.closeActions.push subscriber.close }
-  let subscription : Subscription Unit :=
+  let subscription : Subscription :=
     { unsubscribe := flow.unsubscribe subscriberId
       waitForCompletion := do
         let _ ← IO.wait subscriber.completion.result! }
@@ -212,7 +212,7 @@ def addSubscriber
     cancel       -- stop subscribing
     ```
 -/
-def subscribe (flow : SharedFlow α) (action : α → IO Unit) : IO (Subscription Unit) :=
+def subscribe (flow : SharedFlow α) (action : α → IO Unit) : IO (Subscription) :=
   flow.state.atomically do
     let state ← get
     let (newState, subscription) ← addSubscriber flow state action

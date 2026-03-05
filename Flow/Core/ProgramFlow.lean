@@ -94,7 +94,7 @@ def subscribe
     [inst : Flows.MergeableState σ]
     (flow : ProgramFlow ψ σ ε α)
     (action : Except ε α → Program ψ σ ε Unit)
-    : IO (Subscription Unit) := do
+    : IO (Subscription) := do
   SharedFlow.subscribe flow.underlying.toSharedFlow fun exceptVal => do
     let _ ← Flows.withStateSync flow.stateMutexes flow.config (action exceptVal)
     pure ()
@@ -120,6 +120,14 @@ def combine
     { underlying := result
       stateMutexes := flow1.stateMutexes ++ flow2.stateMutexes
       config := Flows.Combinable.combine flow1.config flow2.config }
+
+/-- Read the current state from the primary mutex.
+    Returns `none` if the flow has no state mutexes. -/
+def currentState (flow : ProgramFlow ψ σ ε α) : IO (Option σ) :=
+  if h : 0 < flow.stateMutexes.size then
+    flow.stateMutexes[0].atomically do return ← get
+  else
+    pure none
 
 end ProgramFlow
 
