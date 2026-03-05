@@ -60,11 +60,12 @@ def testWaitForCompletionBlocksUntilSubscriberTaskEnds : IO Unit := do
   let values ← IO.mkRef ([] : List Nat)
   let sub ← SharedFlow.subscribe flow.toSharedFlow fun v =>
     values.modify (v :: ·)
-  flow.emit 1
-  flow.emit 2
   -- Spawn a task that waits 5ms then closes the flow
   let _ ← IO.asTask do
-    IO.sleep 5
+    IO.sleep 2
+    flow.emit 1
+    flow.emit 2
+    IO.sleep 2
     flow.close
   -- waitForCompletion blocks until the subscriber's processing loop ends,
   -- which happens after close tears down the channel
