@@ -52,6 +52,7 @@ where
 
 namespace ProgramFlow
 
+/-- Create a new ProgramFlow, initialising the state mutex from the current Program state. -/
 def create
     (replay : Nat := 0)
     (bufferSize : Nat := 64)
