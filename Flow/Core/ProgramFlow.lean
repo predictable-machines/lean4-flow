@@ -124,6 +124,8 @@ def flush (flow : ProgramFlow ψ σ ε α) : Program ψ σ ε Unit := do
   let updatedState ← flow.stateMutexes.val[0]'flow.stateMutexes.property |>.atomically do return ← get
   MonadState.set updatedState
 
+/-- Merge two `ProgramFlow`s into one, combining their configs and collecting all
+    state mutexes so deltas propagate to every originating mutex. -/
 def combine
     [Flows.Combinable ψ]
     (flow1 : ProgramFlow ψ σ ε α)
