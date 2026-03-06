@@ -68,6 +68,7 @@ def create
   let stateMutex ← Std.Mutex.new state
   pure { underlying, stateMutexes := ⟨#[stateMutex], by simp⟩, config }
 
+/-- Lift an existing `MutableSharedFlow` into a `ProgramFlow`, wrapping each value in `Except.ok`. -/
 def liftShared
     (shared : MutableSharedFlow α)
     : Program ψ σ ε (ProgramFlow ψ σ ε α) := do
