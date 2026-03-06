@@ -22,6 +22,12 @@ structure ReactiveProgramDefinition (f : Type → Type) (ψ σ ε α : Type) whe
 
 namespace ReactiveProgram
 
+/-- Initialise a reactive program loop.
+
+    Subscribes to all source flows, routing emissions into an internal `ProgramFlow`.
+    Each event is processed by `update` (pure state transition) and `sideEffect` (Program action).
+    Returns a promise that resolves to `some (.ok finalState)` when the flow closes normally,
+    `some (.error e)` on an unhandled error, or `none` if the promise was never resolved. -/
 def init
     [IOSubscribable f (Except ε)]
     [Flows.MergeableState σ]
