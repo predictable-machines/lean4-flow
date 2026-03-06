@@ -79,7 +79,7 @@ def testWaitForCompletionOnColdFlow : IO Unit := do
 
 instance : Flows.MergeableState Nat where
   merge initial new existing := existing + (new - initial)
-  withoutMergeable _ := 0
+  withEmptyAppendable _ := 0
 
 def testProgramFlowCurrentStateAfterCompletion : IO Unit := do
   let result ← Program.run (ψ := Unit) (ε := Empty) (σ := Nat) (do
