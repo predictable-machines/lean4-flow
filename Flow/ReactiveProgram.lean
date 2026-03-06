@@ -22,6 +22,12 @@ structure ReactiveProgramDefinition (f : Type → Type) (ψ σ ε α : Type) whe
 
 namespace ReactiveProgram
 
+/-- Initialise a reactive program loop.
+
+    Subscribes to all source flows, routing emissions into an internal `ProgramFlow`.
+    Each event is processed by `update` (pure state transition) and `sideEffect` (Program action).
+    Returns a promise that resolves to `some (.ok finalState)` when the flow closes normally,
+    `some (.error e)` on an unhandled error, or `none` if the promise was never resolved. -/
 def init
     [IOSubscribable f (Except ε)]
     [Flows.MergeableState σ]
@@ -31,13 +37,13 @@ def init
   let (flow : ProgramFlow ψ σ ε α) ← ProgramFlow.create (replay := 10)
 
   for source in definition.sources do
-    let close ← IOSubscribable.subscribe source fun exceptVal =>
+    let sub ← IOSubscribable.subscribe source fun exceptVal =>
       match exceptVal with
       | Except.ok a => flow.emit a
       | Except.error e => flow.emitError e
     flow.underlying.state.atomically do
       let state ← get
-      set { state with closeActions := state.closeActions.push close }
+      set { state with closeActions := state.closeActions.push sub.unsubscribe }
 
   flow.underlying.state.atomically do
     let state ← get
@@ -56,26 +62,20 @@ def init
       definition.onUpdated newState
     definition.sideEffect event accessor
 
-  let readFinalState : IO (Option σ) := do
-    if h : 0 < flow.stateMutexes.size then
-      flow.stateMutexes[0].atomically do return ← get
-    else
-      pure none
-
   let finishingPromise ← IO.Promise.new (α := Option (Except ε σ))
 
-  let _ ← flow.underlying.subscribe fun (exceptVal : Except ε α) => do
+  discard <| flow.underlying.toSharedFlow.subscribe fun (exceptVal : Except ε α) => do
     match exceptVal with
     | .ok event =>
-      let result ← Flows.withStateSync flow.stateMutexes flow.config (processMsg event)
+      let result ← Flows.withStateSync flow.stateMutexes.val flow.config (processMsg event)
       match result with
       | .error e =>
         finishingPromise.resolve <| some <| Except.error e
         flow.close
       | .ok () =>
         if ← flow.isClosed then
-          let finalState ← readFinalState
-          finishingPromise.resolve <| finalState.map Except.ok
+          let finalState ← flow.currentState
+          finishingPromise.resolve <| some <| Except.ok finalState
     | .error err =>
       match definition.onError err with
       | some event => flow.emit event

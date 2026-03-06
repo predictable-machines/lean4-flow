@@ -1,5 +1,5 @@
 import FlowTest.Core.ToListTests
-import FlowTest.Core.ForEachTests
+import FlowTest.Core.SubscribeTests
 import FlowTest.Core.MapTests
 import FlowTest.Core.FilterTests
 import FlowTest.Core.BuildersTests
@@ -10,7 +10,7 @@ namespace CoreTests
 
 def allTests : List (String × IO Unit) :=
   ToListTests.allTests
-  ++ ForEachTests.allTests
+  ++ SubscribeTests.allTests
   ++ MapTests.allTests
   ++ FilterTests.allTests
   ++ BuildersTests.allTests

@@ -25,9 +25,18 @@ Type parameters:
 - `α`: value type
 -/
 
+/-- Subscription handle for ProgramFlow that also provides access to the current state. -/
+structure ProgramFlowSubscription (σ : Type) extends Subscription where
+  currentState : IO σ
+
+/-- Hot, multicast stream backed by a `MutableSharedFlow` with shared state mutexes.
+
+    `stateMutexes` is a non-empty subtype so callers can index element 0 without
+    bounds checks, and combined flows carry mutexes from both sources so state
+    deltas propagate to every originating mutex. -/
 structure ProgramFlow (ψ σ ε α : Type) where
   underlying : MutableSharedFlow (Except ε α)
-  stateMutexes : Array (Std.Mutex σ)
+  stateMutexes : { arr : Array (Std.Mutex σ) // 0 < arr.size }
   config : ψ
 
 instance
@@ -43,6 +52,7 @@ where
 
 namespace ProgramFlow
 
+/-- Create a new ProgramFlow, initialising the state mutex from the current Program state. -/
 def create
     (replay : Nat := 0)
     (bufferSize : Nat := 64)
@@ -56,8 +66,9 @@ def create
     (bufferSize := bufferSize)
     (onBufferOverflow := onBufferOverflow)
   let stateMutex ← Std.Mutex.new state
-  pure { underlying, stateMutexes := #[stateMutex], config }
+  pure { underlying, stateMutexes := ⟨#[stateMutex], by simp⟩, config }
 
+/-- Lift an existing `MutableSharedFlow` into a `ProgramFlow`, wrapping each value in `Except.ok`. -/
 def liftShared
     (shared : MutableSharedFlow α)
     : Program ψ σ ε (ProgramFlow ψ σ ε α) := do
@@ -65,7 +76,7 @@ def liftShared
   let config ← read
   let stateMutex ← Std.Mutex.new state
   let underlying ← Flows.map shared (Except.ok ·)
-  pure { underlying, stateMutexes := #[stateMutex], config }
+  pure { underlying, stateMutexes := ⟨#[stateMutex], by simp⟩, config }
 
 
 def emit (flow : ProgramFlow ψ σ ε α) (value : α) : IO Unit :=
@@ -90,21 +101,32 @@ def isClosed (flow : ProgramFlow ψ σ ε α) : IO Bool :=
 def subscriberCount (flow : ProgramFlow ψ σ ε α) : IO Nat :=
   flow.underlying.subscriberCount
 
+/-- Read the current state from the primary mutex. -/
+def currentState (flow : ProgramFlow ψ σ ε α) : IO σ :=
+  flow.stateMutexes.val[0]'flow.stateMutexes.property |>.atomically do return ← get
+
+/-- Subscribe to emissions, running each callback as a `Program` action via `withStateSync`.
+    Returns a `ProgramFlowSubscription` that includes `unsubscribe`, `waitForCompletion`,
+    and `currentState`. -/
 def subscribe
     [inst : Flows.MergeableState σ]
     (flow : ProgramFlow ψ σ ε α)
     (action : Except ε α → Program ψ σ ε Unit)
-    : IO (IO Unit) := do
-  flow.underlying.subscribe fun exceptVal => do
-    let _ ← Flows.withStateSync flow.stateMutexes flow.config (action exceptVal)
+    : IO (ProgramFlowSubscription σ) := do
+  let sub ← SharedFlow.subscribe flow.underlying.toSharedFlow fun exceptVal => do
+    discard <| Flows.withStateSync flow.stateMutexes.val flow.config (action exceptVal)
     pure ()
+  pure { toSubscription := sub, currentState := flow.currentState }
 
+/-- Waits until no events are being processed and the queue is clear,
+    then syncs the primary mutex's state back into the `Program` monad. -/
 def flush (flow : ProgramFlow ψ σ ε α) : Program ψ σ ε Unit := do
   flow.underlying.flush
-  if h : 0 < flow.stateMutexes.size then
-    let updatedState ← flow.stateMutexes[0].atomically do return ← get
-    MonadState.set updatedState
+  let updatedState ← flow.stateMutexes.val[0]'flow.stateMutexes.property |>.atomically do return ← get
+  MonadState.set updatedState
 
+/-- Merge two `ProgramFlow`s into one, combining their configs and collecting all
+    state mutexes so deltas propagate to every originating mutex. -/
 def combine
     [Flows.Combinable ψ]
     (flow1 : ProgramFlow ψ σ ε α)
@@ -118,7 +140,7 @@ def combine
     | .inr (.error e) => Except.error e)
   pure
     { underlying := result
-      stateMutexes := flow1.stateMutexes ++ flow2.stateMutexes
+      stateMutexes := ⟨flow1.stateMutexes.val ++ flow2.stateMutexes.val, by grind⟩
       config := Flows.Combinable.combine flow1.config flow2.config }
 
 end ProgramFlow
@@ -131,7 +153,9 @@ instance
       (Program ψ σ ε)
       (Except ε) where
   combine := ProgramFlow.combine
-  subscribe := fun flow action => ProgramFlow.subscribe flow action
+  subscribe := fun flow action => do
+    let sub ← ProgramFlow.subscribe flow action
+    pure sub.toSubscription
   flush := ProgramFlow.flush
 
 end Flow.Core

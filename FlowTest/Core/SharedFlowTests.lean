@@ -12,19 +12,19 @@ def testMultipleConsumersAndCancellation : IO Unit := do
   let consumer2Values ← IO.mkRef ([] : List Nat)
   let consumer3Values ← IO.mkRef ([] : List Nat)
 
-  let _ ← flow.subscribe fun v => do
+  discard <| flow.subscribe fun v => do
     consumer1Values.modify (v :: ·)
-  let cancel2 ← flow.subscribe fun v => do
+  let subscription2 ← flow.subscribe fun v => do
     consumer2Values.modify (v :: ·)
-  let cancel3 ← flow.subscribe fun v => do
+  let subscription3 ← flow.subscribe fun v => do
     consumer3Values.modify (v :: ·)
 
   flow.emit 10
   flow.flush
-  cancel2
+  subscription2.unsubscribe
   flow.emit 20
   flow.flush
-  cancel3
+  subscription3.unsubscribe
   flow.emit 30
   flow.flush
 
@@ -45,7 +45,7 @@ def testReplayBufferForNewSubscribers : IO Unit := do
   flow.emit 3
 
   let lateSubscriberValues ← IO.mkRef ([] : List Nat)
-  let _ ← flow.subscribe fun v => do
+  discard <| flow.subscribe fun v => do
     lateSubscriberValues.modify (v :: ·)
   flow.flush
 
@@ -59,11 +59,11 @@ def testSubscriberCountTracking : IO Unit := do
   let count0 ← flow.subscriberCount
   count0 |> shouldEqual 0
 
-  let cancel ← flow.subscribe fun _ => pure ()
+  let subscription ← flow.subscribe fun _ => pure ()
   let count1 ← flow.subscriberCount
   count1 |> shouldEqual 1
 
-  cancel
+  subscription.unsubscribe
   let count2 ← flow.subscriberCount
   count2 |> shouldEqual 0
   flow.close
@@ -74,9 +74,9 @@ def testEmitAllSendsMultipleValues : IO Unit := do
   let consumer1 ← IO.mkRef ([] : List Nat)
   let consumer2 ← IO.mkRef ([] : List Nat)
 
-  let _ ← flow.subscribe fun v => do
+  discard <| flow.subscribe fun v => do
     consumer1.modify (v :: ·)
-  let _ ← flow.subscribe fun v => do
+  discard <| flow.subscribe fun v => do
     consumer2.modify (v :: ·)
 
   flow.emitAll [100, 200, 300, 400, 500]
@@ -93,7 +93,7 @@ def testClosePreventsNewEmissions : IO Unit := do
   let flow ← MutableSharedFlow.create (α := Nat)
 
   let values ← IO.mkRef ([] : List Nat)
-  let _ ← flow.subscribe fun v => do
+  discard <| flow.subscribe fun v => do
     values.modify (v :: ·)
 
   flow.emit 1
@@ -115,12 +115,12 @@ def testClosePreventsNewEmissions : IO Unit := do
   let vals ← values.get
   vals |> shouldEqual [1]
 
-def testCancelCascadesToMapChild : IO Unit := do
+def testCloseCascadesToMapChild : IO Unit := do
   let parent ← MutableSharedFlow.create (α := Nat)
   let child ← Flows.map parent (· * 2)
 
   let childValues ← IO.mkRef ([] : List Nat)
-  let _ ← child.subscribe fun v => do
+  discard <|child.subscribe fun v => do
     childValues.modify (v :: ·)
 
   parent.emit 5
@@ -136,12 +136,12 @@ def testCancelCascadesToMapChild : IO Unit := do
   parentClosed |> shouldEqual true
   childClosed |> shouldEqual true
 
-def testCancelCascadesToFilterChild : IO Unit := do
+def testCloseCascadesToFilterChild : IO Unit := do
   let parent ← MutableSharedFlow.create (α := Nat)
   let child ← Flows.filter parent (· > 5)
 
   let childValues ← IO.mkRef ([] : List Nat)
-  let _ ← child.subscribe fun v => do
+  discard <|child.subscribe fun v => do
     childValues.modify (v :: ·)
 
   parent.emit 3
@@ -158,13 +158,13 @@ def testCancelCascadesToFilterChild : IO Unit := do
   parentClosed |> shouldEqual true
   childClosed |> shouldEqual true
 
-def testCancelCascadesToFilterMapChild : IO Unit := do
+def testCloseCascadesToFilterMapChild : IO Unit := do
   let parent ← MutableSharedFlow.create (α := Nat)
   let child ← MutableSharedFlow.filterMap parent.toSharedFlow fun n =>
     if n % 2 == 0 then some (n * 10) else none
 
   let childValues ← IO.mkRef ([] : List Nat)
-  let _ ← child.subscribe fun v => do
+  discard <|child.subscribe fun v => do
     childValues.modify (v :: ·)
 
   parent.emit 1
@@ -189,7 +189,7 @@ def testRecursiveCascadingCancellation : IO Unit := do
   let grandchild ← Flows.filter child (· > 10)
 
   let grandchildValues ← IO.mkRef ([] : List Nat)
-  let _ ← grandchild.subscribe fun v => do
+  discard <|grandchild.subscribe fun v => do
     grandchildValues.modify (v :: ·)
 
   parent.emit 3
@@ -215,9 +215,9 @@ def testFlushMapChildCascadesToParent : IO Unit := do
   let parentValues ← IO.mkRef ([] : List Nat)
   let childValues ← IO.mkRef ([] : List Nat)
 
-  let _ ← parent.subscribe fun v => do
+  discard <|parent.subscribe fun v => do
     parentValues.modify (v :: ·)
-  let _ ← child.subscribe fun v => do
+  discard <|child.subscribe fun v => do
     childValues.modify (v :: ·)
 
   parent.emit 5
@@ -236,9 +236,9 @@ def testFlushFilterChildCascadesToParent : IO Unit := do
   let parentValues ← IO.mkRef ([] : List Nat)
   let childValues ← IO.mkRef ([] : List Nat)
 
-  let _ ← parent.subscribe fun v => do
+  discard <|parent.subscribe fun v => do
     parentValues.modify (v :: ·)
-  let _ ← child.subscribe fun v => do
+  discard <|child.subscribe fun v => do
     childValues.modify (v :: ·)
 
   parent.emit 3
@@ -258,9 +258,9 @@ def testFlushFilterMapChildCascadesToParent : IO Unit := do
   let parentValues ← IO.mkRef ([] : List Nat)
   let childValues ← IO.mkRef ([] : List Nat)
 
-  let _ ← parent.subscribe fun v => do
+  discard <|parent.subscribe fun v => do
     parentValues.modify (v :: ·)
-  let _ ← child.subscribe fun v => do
+  discard <|child.subscribe fun v => do
     childValues.modify (v :: ·)
 
   parent.emit 1
@@ -283,11 +283,11 @@ def testRecursiveCascadingFlush : IO Unit := do
   let childValues ← IO.mkRef ([] : List Nat)
   let grandchildValues ← IO.mkRef ([] : List Nat)
 
-  let _ ← parent.subscribe fun v => do
+  discard <|parent.subscribe fun v => do
     parentValues.modify (v :: ·)
-  let _ ← child.subscribe fun v => do
+  discard <|child.subscribe fun v => do
     childValues.modify (v :: ·)
-  let _ ← grandchild.subscribe fun v => do
+  discard <|grandchild.subscribe fun v => do
     grandchildValues.modify (v :: ·)
 
   parent.emit 3
@@ -307,7 +307,7 @@ def testCombineReceivesFromBothParents : IO Unit := do
   let combined ← MutableSharedFlow.combine flow1 flow2
   let leftValues ← IO.mkRef ([] : List Nat)
   let rightValues ← IO.mkRef ([] : List Nat)
-  let _ ← combined.subscribe fun v => match v with
+  discard <|combined.subscribe fun v => match v with
     | Sum.inl a => leftValues.modify (· ++ [a])
     | Sum.inr b => rightValues.modify (· ++ [b])
   flow1.emit 1
@@ -336,9 +336,9 @@ def testCombineFlushCascadesToParents : IO Unit := do
   let parentValues ← IO.mkRef ([] : List Nat)
   let leftValues ← IO.mkRef ([] : List Nat)
   let rightValues ← IO.mkRef ([] : List Nat)
-  let _ ← flow1.subscribe fun v => do
+  discard <| flow1.subscribe fun v => do
     parentValues.modify (v :: ·)
-  let _ ← combined.subscribe fun v => match v with
+  discard <|combined.subscribe fun v => match v with
     | Sum.inl a => leftValues.modify (· ++ [a])
     | Sum.inr b => rightValues.modify (· ++ [b])
   flow1.emit 1
@@ -356,9 +356,9 @@ def allTests : List (String × IO Unit) := [
     ("SharedFlow: subscriber count tracking", testSubscriberCountTracking),
     ("SharedFlow: emitAll sends multiple values", testEmitAllSendsMultipleValues),
     ("SharedFlow: close prevents new emissions", testClosePreventsNewEmissions),
-    ("SharedFlow: cancel cascades to map child", testCancelCascadesToMapChild),
-    ("SharedFlow: cancel cascades to filter child", testCancelCascadesToFilterChild),
-    ("SharedFlow: cancel cascades to filterMap child", testCancelCascadesToFilterMapChild),
+    ("SharedFlow: close cascades to map child", testCloseCascadesToMapChild),
+    ("SharedFlow: close cascades to filter child", testCloseCascadesToFilterChild),
+    ("SharedFlow: close cascades to filterMap child", testCloseCascadesToFilterMapChild),
     ("SharedFlow: recursive cascading cancellation", testRecursiveCascadingCancellation),
     ("SharedFlow: flush map child cascades to parent", testFlushMapChildCascadesToParent),
     ("SharedFlow: flush filter child cascades to parent", testFlushFilterChildCascadesToParent),

@@ -10,7 +10,7 @@ namespace Flow.Core
 
 `DerivedFlow` defines a single derivation mechanism for constructing transformed flows.
 `Flows` extends `DerivedFlow` and provides `map`, `filter`, `filterMap` with defaults
-derived from `derive`, plus `combine`, `subscribe`, `flush`, `forEach`, and `toList`.
+derived from `derive`, plus `combine`, `subscribe`, `flush`, and `toList`.
 -/
 
 /-- Construct a derived flow from a source, given a handler that processes
@@ -37,6 +37,12 @@ private def defaultFilterMap [DerivedFlow F] (flow : F α) (f : α → Option β
     | some b => emit b
     | none => pure ()
 
+/-- Subscription handle returned by `subscribe`.
+    Provides named fields for unsubscribing and waiting for the subscriber to complete. -/
+structure Subscription where
+  unsubscribe : IO Unit
+  waitForCompletion : IO Unit
+
 /-- Typeclass for stream types that can be subscribed to.
 
     Parameterized by:
@@ -57,8 +63,8 @@ class Flows
     [MonadLiftT IO m]
     [MonadLiftT v Option]
     extends DerivedFlow f where
-  /-- Register a callback for each emission. Returns an unsubscribe action. -/
-  subscribe : f α → (v α → m Unit) → IO (IO Unit)
+  /-- Register a callback for each emission. Returns a Subscription handle. -/
+  subscribe : f α → (v α → m Unit) → IO Subscription
   /-- Drive the flow to completion, blocking until all items are emitted. -/
   flush : f α → m Unit
   /-- Merge two flows into one, tagging emissions with `Sum.inl` / `Sum.inr`. -/
@@ -69,28 +75,22 @@ class Flows
   filter : f α → (α → Bool) → IO (f α) := defaultFilter
   /-- Transform and filter in one pass: emit only `some` results. -/
   filterMap : f α → (α → Option β) → IO (f β) := defaultFilterMap
-  /-- Subscribe, flush, then unsubscribe — process every emission exactly once. -/
-  forEach : f α → (v α → m Unit) → m Unit :=
-    fun flow f => do
-      let unsub ← (subscribe flow f : IO _)
-      flush flow
-      unsub
   /-- Collect all emissions into a list (subscribe, flush, unsubscribe). -/
   toList : f α → m (List α) :=
     fun flow => do
       let list ← (IO.mkRef ([] : List α) : IO _)
-      let unsub ← (subscribe flow fun a => do
+      let sub ← (subscribe flow fun a => do
         match MonadLiftT.monadLift a with
         | some a' => ((list.modify (a' :: ·) : IO Unit) : IO _)
         | none => pure ())
       flush flow
-      unsub
+      sub.unsubscribe
       (← (list.get : IO _)).reverse |> pure
 
 /-- Subscribe interface with support for a value wrapper `v` (e.g. `Id` or `Except ε`).
     Allows subscribers to handle values and errors through `v α`. -/
 class IOSubscribable (f : Type → Type) (v : outParam (Type → Type)) where
-  subscribe : f α → (v α → IO Unit) → IO (IO Unit)
+  subscribe : f α → (v α → IO Unit) → IO Subscription
 
 /-- Any `Flows` instance is automatically `IOSubscribable`. -/
 instance
@@ -99,13 +99,14 @@ instance
     [MonadLiftT v Option]
     [Flows f m v]
     : IOSubscribable f v where
-  subscribe flow callback :=
-    Flows.subscribe flow fun va => MonadLiftT.monadLift (callback va)
+  subscribe flow callback := do
+    let sub ← Flows.subscribe flow fun va => MonadLiftT.monadLift (callback va)
+    pure sub
 
 /-- Type-erased subscription handle so heterogeneous source types can share a list.
     `v` comes first so `IOSubscription v` is a proper `Type → Type` for typeclass resolution. -/
 structure IOSubscription (v : Type → Type) (α : Type) where
-  subscribe : (v α → IO Unit) → IO (IO Unit)
+  subscribe : (v α → IO Unit) → IO Subscription
 
 instance : IOSubscribable (IOSubscription v) v where
   subscribe sub callback := sub.subscribe callback
@@ -120,10 +121,12 @@ def IOSubscribable.mapped
     (source : f β)
     (transform : v β → Option (w α))
     : IOSubscription w α :=
-  { subscribe := fun callback => IOSubscribable.subscribe source fun vb =>
-      match transform vb with
-      | some a => callback a
-      | none => pure () }
+  { subscribe := fun callback => do
+      let sub ← IOSubscribable.subscribe source fun vb =>
+        match transform vb with
+        | some a => callback a
+        | none => pure ()
+      pure sub }
 
 namespace Flows
 
