@@ -29,6 +29,11 @@ Type parameters:
 structure ProgramFlowSubscription (σ : Type) extends Subscription where
   currentState : IO σ
 
+/-- Hot, multicast stream backed by a `MutableSharedFlow` with shared state mutexes.
+
+    `stateMutexes` is a non-empty subtype so callers can index element 0 without
+    bounds checks, and combined flows carry mutexes from both sources so state
+    deltas propagate to every originating mutex. -/
 structure ProgramFlow (ψ σ ε α : Type) where
   underlying : MutableSharedFlow (Except ε α)
   stateMutexes : { arr : Array (Std.Mutex σ) // 0 < arr.size }
