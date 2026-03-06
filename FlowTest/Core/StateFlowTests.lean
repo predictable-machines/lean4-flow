@@ -13,7 +13,7 @@ def testHoldsInitialValue : IO Unit := do
 def testNewSubscribersReceiveCurrentValue : IO Unit := do
   let flow ← MutableStateFlow.create "hello"
   let receivedValues ← IO.mkRef ([] : List String)
-  discard <|flow.subscribe fun v => do
+  discard <| flow.subscribe fun v => do
     receivedValues.modify (v :: ·)
   flow.flush
   let vals ← receivedValues.get
@@ -24,9 +24,9 @@ def testMultipleSubscribersReceiveSameUpdates : IO Unit := do
   let flow ← MutableStateFlow.create (some 0)
   let consumer1Values ← IO.mkRef ([] : List Nat)
   let consumer2Values ← IO.mkRef ([] : List Nat)
-  discard <|flow.subscribe fun v => do
+  discard <| flow.subscribe fun v => do
     consumer1Values.modify (v :: ·)
-  discard <|flow.subscribe fun v => do
+  discard <| flow.subscribe fun v => do
     consumer2Values.modify (v :: ·)
   flow.flush
   flow.emit 10
@@ -44,7 +44,7 @@ def testCancellationStopsReceivingValues : IO Unit := do
   let consumer1Values ← IO.mkRef ([] : List Nat)
   let consumer2Values ← IO.mkRef ([] : List Nat)
   let consumer3Values ← IO.mkRef ([] : List Nat)
-  discard <|flow.subscribe fun v => do
+  discard <| flow.subscribe fun v => do
     consumer1Values.modify (v :: ·)
   let subscription2 ← flow.subscribe fun v => do
     consumer2Values.modify (v :: ·)
@@ -102,7 +102,7 @@ def testCompareAndSet : IO Unit := do
 def testClosePreventsNewEmissions : IO Unit := do
   let flow ← MutableStateFlow.create (some 0)
   let values ← IO.mkRef ([] : List Nat)
-  discard <|flow.subscribe fun v => do
+  discard <| flow.subscribe fun v => do
     values.modify (v :: ·)
   flow.emit 1
   flow.flush
@@ -288,7 +288,7 @@ def testCombineFlushCascadesToParents : IO Unit := do
   let parentValues ← IO.mkRef ([] : List Nat)
   let leftValues ← IO.mkRef ([] : List Nat)
   let rightValues ← IO.mkRef ([] : List Nat)
-  discard <|flow1.subscribe fun v => do
+  discard <| flow1.subscribe fun v => do
     parentValues.modify (v :: ·)
   discard <|combined.subscribe fun v => match v with
     | Sum.inl a => leftValues.modify (a :: ·)

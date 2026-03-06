@@ -12,7 +12,7 @@ def testMultipleConsumersAndCancellation : IO Unit := do
   let consumer2Values ← IO.mkRef ([] : List Nat)
   let consumer3Values ← IO.mkRef ([] : List Nat)
 
-  discard <|flow.subscribe fun v => do
+  discard <| flow.subscribe fun v => do
     consumer1Values.modify (v :: ·)
   let subscription2 ← flow.subscribe fun v => do
     consumer2Values.modify (v :: ·)
@@ -45,7 +45,7 @@ def testReplayBufferForNewSubscribers : IO Unit := do
   flow.emit 3
 
   let lateSubscriberValues ← IO.mkRef ([] : List Nat)
-  discard <|flow.subscribe fun v => do
+  discard <| flow.subscribe fun v => do
     lateSubscriberValues.modify (v :: ·)
   flow.flush
 
@@ -74,9 +74,9 @@ def testEmitAllSendsMultipleValues : IO Unit := do
   let consumer1 ← IO.mkRef ([] : List Nat)
   let consumer2 ← IO.mkRef ([] : List Nat)
 
-  discard <|flow.subscribe fun v => do
+  discard <| flow.subscribe fun v => do
     consumer1.modify (v :: ·)
-  discard <|flow.subscribe fun v => do
+  discard <| flow.subscribe fun v => do
     consumer2.modify (v :: ·)
 
   flow.emitAll [100, 200, 300, 400, 500]
@@ -93,7 +93,7 @@ def testClosePreventsNewEmissions : IO Unit := do
   let flow ← MutableSharedFlow.create (α := Nat)
 
   let values ← IO.mkRef ([] : List Nat)
-  discard <|flow.subscribe fun v => do
+  discard <| flow.subscribe fun v => do
     values.modify (v :: ·)
 
   flow.emit 1
@@ -336,7 +336,7 @@ def testCombineFlushCascadesToParents : IO Unit := do
   let parentValues ← IO.mkRef ([] : List Nat)
   let leftValues ← IO.mkRef ([] : List Nat)
   let rightValues ← IO.mkRef ([] : List Nat)
-  discard <|flow1.subscribe fun v => do
+  discard <| flow1.subscribe fun v => do
     parentValues.modify (v :: ·)
   discard <|combined.subscribe fun v => match v with
     | Sum.inl a => leftValues.modify (· ++ [a])
