@@ -126,9 +126,7 @@ def combine
     | .inr (.error e) => Except.error e)
   pure
     { underlying := result
-      stateMutexes := ⟨flow1.stateMutexes.val ++ flow2.stateMutexes.val, by
-        have := flow1.stateMutexes.property
-        simp [Array.size_append]; omega⟩
+      stateMutexes := ⟨flow1.stateMutexes.val ++ flow2.stateMutexes.val, by grind⟩
       config := Flows.Combinable.combine flow1.config flow2.config }
 
 end ProgramFlow
