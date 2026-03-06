@@ -118,7 +118,8 @@ def subscribe
     pure ()
   pure { toSubscription := sub, currentState := flow.currentState }
 
-/-- Flush buffered emissions and sync the primary mutex's state back into the `Program` monad. -/
+/-- Waits until no events are being processed and the queue is clear,
+    then syncs the primary mutex's state back into the `Program` monad. -/
 def flush (flow : ProgramFlow ψ σ ε α) : Program ψ σ ε Unit := do
   flow.underlying.flush
   let updatedState ← flow.stateMutexes.val[0]'flow.stateMutexes.property |>.atomically do return ← get
