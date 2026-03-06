@@ -105,6 +105,9 @@ def subscriberCount (flow : ProgramFlow ψ σ ε α) : IO Nat :=
 def currentState (flow : ProgramFlow ψ σ ε α) : IO σ :=
   flow.stateMutexes.val[0]'flow.stateMutexes.property |>.atomically do return ← get
 
+/-- Subscribe to emissions, running each callback as a `Program` action via `withStateSync`.
+    Returns a `ProgramFlowSubscription` that includes `unsubscribe`, `waitForCompletion`,
+    and `currentState`. -/
 def subscribe
     [inst : Flows.MergeableState σ]
     (flow : ProgramFlow ψ σ ε α)
