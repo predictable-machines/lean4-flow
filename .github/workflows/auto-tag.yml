@@ -38,6 +38,6 @@ jobs:
         if: steps.check.outputs.exists == 'false'
         run: |
           git config user.name "Predictable Machines"
-          git config user.email "info@predictablemachines.com"
+          git config user.email "oss@predictablemachines.com"
           git tag -a "${{ steps.version.outputs.version }}" -m "${{ steps.version.outputs.version }}"
           git push origin "${{ steps.version.outputs.version }}"
