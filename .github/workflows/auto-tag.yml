@@ -19,6 +19,10 @@ jobs:
         id: version
         run: |
           version=$(grep -oP 'version := v!"\K[^"]+' lakefile.lean)
+          if [ -z "$version" ]; then
+            echo "Failed to extract version from lakefile.lean" >&2
+            exit 1
+          fi
           echo "version=v${version}" >> "$GITHUB_OUTPUT"
 
       - name: Check if tag exists
@@ -33,5 +37,7 @@ jobs:
       - name: Create tag
         if: steps.check.outputs.exists == 'false'
         run: |
+          git config user.name "Predictable Machines"
+          git config user.email "info@predictablemachines.com"
           git tag -a "${{ steps.version.outputs.version }}" -m "${{ steps.version.outputs.version }}"
           git push origin "${{ steps.version.outputs.version }}"

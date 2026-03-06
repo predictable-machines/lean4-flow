@@ -13,7 +13,7 @@ git branch --show-current
 Find the open PR for this branch:
 
 ```bash
-gh pr view --json number,title,url,state
+.claude/scripts/pr-view.sh
 ```
 
 If no PR exists, inform the user and stop.
@@ -36,45 +36,31 @@ If no PR exists, inform the user and stop.
 
 ### Fetch Commands
 
+All fetch commands use scripts from `.claude/scripts/` (pre-approved in `.claude/settings.json`).
+Pass `{owner}`, `{repo}`, and `{pr_number}` as positional arguments.
+
 Get review threads via GraphQL (the only way to get resolved/unresolved thread status):
 
 ```bash
-gh api graphql -f query='
-  query($owner: String!, $repo: String!, $pr: Int!) {
-    repository(owner: $owner, name: $repo) {
-      pullRequest(number: $pr) {
-        reviewThreads(first: 100) {
-          nodes {
-            isResolved
-            path
-            line
-            comments(first: 20) {
-              nodes { body author { login } }
-            }
-          }
-        }
-      }
-    }
-  }
-' -f owner={owner} -f repo={repo} -F pr={pr_number}
+.claude/scripts/pr-review-threads.sh {owner} {repo} {pr_number}
 ```
 
 Get PR conversation comments:
 
 ```bash
-gh api repos/{owner}/{repo}/issues/{pr_number}/comments --jq '.[] | {id: .id, body: .body, user: .user.login, created_at: .created_at}'
+.claude/scripts/pr-conversation-comments.sh {owner} {repo} {pr_number}
 ```
 
-Get review summaries (exclude dismissed — note: avoid `!=` in jq, use `| not` pattern):
+Get review summaries (exclude dismissed):
 
 ```bash
-gh api repos/{owner}/{repo}/pulls/{pr_number}/reviews --jq '[.[] | select(.state == "DISMISSED" | not) | {id: .id, state: .state, body: .body, user: .user.login}]'
+.claude/scripts/pr-reviews.sh {owner} {repo} {pr_number}
 ```
 
 Get inline review comments:
 
 ```bash
-gh api repos/{owner}/{repo}/pulls/{pr_number}/comments --jq '[.[] | {id: .id, path: .path, line: .line, body: .body, user: .user.login, in_reply_to_id: .in_reply_to_id}]'
+.claude/scripts/pr-inline-comments.sh {owner} {repo} {pr_number}
 ```
 
 ## Step 3: Present Comments to User
@@ -170,7 +156,7 @@ Example format for options:
    - Keep changes focused on what was requested
    - Avoid adding unnecessary features or refactoring
 2. Run `make build` to verify changes compile
-3. If build passes, stage and commit the changes using separate tool calls for `git add` and `git commit`
+3. If build passes, stage and commit the changes using separate tool calls for `git add`, `git commit`, and `git push`
 4. Reply to the comment indicating what was done. Start replies with "Claude here:" to make it clear the response is from Claude, not the user.
 5. Mark the comment as resolved if possible
 
@@ -186,8 +172,4 @@ After addressing comments (or when user chooses "None - just viewing"), provide 
 |---------|--------|--------------|
 | File:line - description | Addressed/Skipped | Brief description of change |
 
-If any commits were made, remind the user to push:
-
-```bash
-git push
-```
+All commits are pushed immediately after creation, so no manual push is needed.

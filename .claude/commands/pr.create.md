@@ -31,22 +31,24 @@ If there are uncommitted changes, ask the user if they want to commit them first
 
 ## Step 2: Find Linked Issues
 
+All fetch commands use scripts from `.claude/scripts/` (pre-approved in `.claude/settings.json`).
+
 Fetch open issues assigned to the current user:
 
 ```bash
-gh issue list --assignee @me --state open --json number,title,body
+.claude/scripts/my-open-issues.sh
 ```
 
 Get the repository owner and name:
 
 ```bash
-gh repo view --json owner,name --jq '.owner.login + "/" + .name'
+.claude/scripts/repo-owner-name.sh
 ```
 
-For each issue found, check if it has a linked branch matching the current branch using the GitHub GraphQL API:
+For each issue found, check if it has a linked branch matching the current branch using the GitHub GraphQL API. Pass `{owner}`, `{repo}`, and `{issue_number}` as positional arguments:
 
 ```bash
-gh api graphql -f query='{ repository(owner:"OWNER", name:"REPO") { issue(number:ISSUE_NUMBER) { linkedBranches(first:10) { nodes { ref { name } } } } } }'
+.claude/scripts/issue-linked-branches.sh {owner} {repo} {issue_number}
 ```
 
 Categorize each issue:

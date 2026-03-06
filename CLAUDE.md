@@ -53,6 +53,10 @@ Uniform `map`, `filter`, `filterMap`, `toList`, `subscribe`, `forEach` across al
 - Use plain `_` for discarded parameters
 - Comments explain "why", not "what"
 
+## Utility Scripts
+
+See [UTILITY_SCRIPTS.md](UTILITY_SCRIPTS.md) for pre-approved read-only scripts in `.claude/scripts/` used by `/pr.review` and `/pr.create` commands.
+
 ## Pull Request Conventions
 
 Include `Fixes #<issue-number>` on first line of PR body to auto-close issues.

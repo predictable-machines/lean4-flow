@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(.claude/scripts/pr-view.sh:*)",
+      "Bash(.claude/scripts/pr-review-threads.sh:*)",
+      "Bash(.claude/scripts/pr-conversation-comments.sh:*)",
+      "Bash(.claude/scripts/pr-reviews.sh:*)",
+      "Bash(.claude/scripts/pr-inline-comments.sh:*)",
+      "Bash(.claude/scripts/my-open-issues.sh:*)",
+      "Bash(.claude/scripts/repo-owner-name.sh:*)",
+      "Bash(.claude/scripts/issue-linked-branches.sh:*)",
+      "Bash(.claude/scripts/issue-parent.sh:*)",
+      "Bash(.claude/scripts/issue-children.sh:*)",
+      "Bash(.claude/scripts/issue-related.sh:*)",
+      "Bash(.claude/scripts/issue-details.sh:*)"
+    ]
+  }
+}
