@@ -195,7 +195,8 @@ def addSubscriber
   let subscription : Subscription :=
     { unsubscribe := flow.unsubscribe subscriberId
       waitForCompletion := do
-        let _ ← IO.wait subscriber.completion.result! }
+        let _ ← IO.wait subscriber.completion.result!
+        subscriber.flush }
   pure (newState, subscription)
 
 /-- Subscribe to emissions from a SharedFlow. Returns a Subscription handle.
