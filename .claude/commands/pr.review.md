@@ -196,7 +196,7 @@ gh pr view --json reviewDecision,reviews,state
 3. If the user confirms, perform the merge:
 
 ```bash
-gh pr merge <pr-number> --merge --delete-branch
+gh pr merge <pr-number> --squash --delete-branch
 ```
 
 4. (Optional) If the repo has project board integration configured, move any linked issues to "Done":
