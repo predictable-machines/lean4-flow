@@ -173,3 +173,44 @@ After addressing comments (or when user chooses "None - just viewing"), provide 
 | File:line - description | Addressed/Skipped | Brief description of change |
 
 All commits are pushed immediately after creation, so no manual push is needed.
+
+## Step 7: Merge Check
+
+After the summary, check if the PR is ready to merge:
+
+1. Check review status, build status, and unresolved threads:
+
+```bash
+gh pr view --json reviewDecision,reviews,state
+.claude/scripts/pr-review-threads.sh {owner} {repo} {pr_number}
+```
+
+   Check the PR status page for build status (Actions tab), or if available:
+
+```bash
+.claude/scripts/pr-build-logs.sh {owner} {repo} {pr_number}
+```
+
+2. If the PR has an approval (`reviewDecision` is `APPROVED`), all review threads are resolved, and the build is passing, ask the user if they want to merge. If the build is failing or pending, inform the user and do not suggest merging.
+
+3. If the user confirms, perform the merge:
+
+```bash
+gh pr merge <pr-number> --squash --delete-branch
+```
+
+4. (Optional) If the repo has project board integration configured, move any linked issues to "Done":
+
+   a. Find linked issues from the PR body (`Fixes #<number>` lines)
+
+   b. For each linked issue, find its project item ID (if available):
+
+   ```bash
+   .claude/scripts/project-item-id.sh <board-number> <owner> {issue_number}
+   ```
+
+   c. Update the item status to "Done":
+
+   ```bash
+   gh project item-edit --project-id <project-id> --id {item_id} --field-id <field-id> --single-select-option-id <done-option-id>
+   ```

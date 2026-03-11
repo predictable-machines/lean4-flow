@@ -13,7 +13,7 @@ structure FlowAccessor (ε α : Type) where
 structure ReactiveProgramDefinition (f : Type → Type) (ψ σ ε α : Type) where
   initialState : σ
   update : σ → α → σ
-  sideEffect : α → FlowAccessor ε α → Program ψ σ ε Unit
+  sideEffect : σ → α → FlowAccessor ε α → ReaderT ψ (ExceptT ε IO) Unit
   onUpdated : σ → ReaderT ψ (ExceptT ε IO) Unit := fun _ => pure ()
   onError : ε → Option α := fun _ => none
   firstMessage : Option α := none
@@ -25,7 +25,9 @@ namespace ReactiveProgram
 /-- Initialise a reactive program loop.
 
     Subscribes to all source flows, routing emissions into an internal `ProgramFlow`.
-    Each event is processed by `update` (pure state transition) and `sideEffect` (Program action).
+    Each event is processed by `update` (pure state transition), then `onUpdated` (rendering hook
+    — conditionally, only when state changes), and finally `sideEffect` (reader/IO action with read-only
+    state access via parameter and no mutable state in the monad stack).
     Returns a promise that resolves to `some (.ok finalState)` when the flow closes normally,
     `some (.error e)` on an unhandled error, or `none` if the promise was never resolved. -/
 def init
@@ -60,7 +62,7 @@ def init
     MonadState.set newState
     if newState != currentState then
       definition.onUpdated newState
-    definition.sideEffect event accessor
+    definition.sideEffect newState event accessor
 
   let finishingPromise ← IO.Promise.new (α := Option (Except ε σ))
 
