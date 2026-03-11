@@ -13,7 +13,7 @@ structure FlowAccessor (ε α : Type) where
 structure ReactiveProgramDefinition (f : Type → Type) (ψ σ ε α : Type) where
   initialState : σ
   update : σ → α → σ
-  sideEffect : α → FlowAccessor ε α → Program ψ σ ε Unit
+  sideEffect : σ → α → FlowAccessor ε α → ReaderT ψ (ExceptT ε IO) Unit
   onUpdated : σ → ReaderT ψ (ExceptT ε IO) Unit := fun _ => pure ()
   onError : ε → Option α := fun _ => none
   firstMessage : Option α := none
@@ -60,7 +60,7 @@ def init
     MonadState.set newState
     if newState != currentState then
       definition.onUpdated newState
-    definition.sideEffect event accessor
+    definition.sideEffect newState event accessor
 
   let finishingPromise ← IO.Promise.new (α := Option (Except ε σ))
 
