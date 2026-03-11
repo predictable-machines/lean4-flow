@@ -25,8 +25,9 @@ namespace ReactiveProgram
 /-- Initialise a reactive program loop.
 
     Subscribes to all source flows, routing emissions into an internal `ProgramFlow`.
-    Each event is processed by `update` (pure state transition), then `sideEffect` (reader/IO action
-    with no state access), and finally `onUpdated` (rendering hook — should be fast and failsafe).
+    Each event is processed by `update` (pure state transition), then `onUpdated` (rendering hook
+    — conditionally, only when state changes), and finally `sideEffect` (reader/IO action with read-only
+    state access via parameter and no mutable state in the monad stack).
     Returns a promise that resolves to `some (.ok finalState)` when the flow closes normally,
     `some (.error e)` on an unhandled error, or `none` if the promise was never resolved. -/
 def init
