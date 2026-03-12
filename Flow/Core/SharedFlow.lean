@@ -284,6 +284,7 @@ def create
 /-- Emit a value to all current subscribers.
 
     Sends the value to each subscriber's channel for processing.
+    If the flow is closed, the value is silently dropped.
 
     Example:
     ```lean
