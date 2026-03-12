@@ -284,6 +284,7 @@ def create
 /-- Emit a value to all current subscribers.
 
     Sends the value to each subscriber's channel for processing.
+    If the flow is closed, the value is silently dropped.
 
     Example:
     ```lean
@@ -296,7 +297,7 @@ def create
 def emit (flow : MutableSharedFlow α) (value : α) : IO Unit :=
   flow.state.atomically do
     let state ← get
-    if state.isClosed then throw (IO.userError "Cannot emit to closed SharedFlow")
+    if state.isClosed then return
     for subscriber in state.subscribers do
       subscriber.enqueue value
     set (state.addToReplay value)
