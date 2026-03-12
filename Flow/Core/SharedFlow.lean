@@ -296,7 +296,7 @@ def create
 def emit (flow : MutableSharedFlow α) (value : α) : IO Unit :=
   flow.state.atomically do
     let state ← get
-    if state.isClosed then throw (IO.userError "Cannot emit to closed SharedFlow")
+    if state.isClosed then return
     for subscriber in state.subscribers do
       subscriber.enqueue value
     set (state.addToReplay value)

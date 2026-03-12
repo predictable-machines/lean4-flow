@@ -103,14 +103,7 @@ def testClosePreventsNewEmissions : IO Unit := do
   let closed ← flow.isClosed
   closed |> shouldEqual true
 
-  let errorThrown ← do
-    try
-      flow.emit 2
-      pure false
-    catch _ =>
-      pure true
-
-  errorThrown |> shouldEqual true
+  flow.emit 2
 
   let vals ← values.get
   vals |> shouldEqual [1]
