@@ -5,6 +5,7 @@ import FlowTest.Core.FilterTests
 import FlowTest.Core.BuildersTests
 import FlowTest.Core.SharedFlowTests
 import FlowTest.Core.StateFlowTests
+import FlowTest.Core.ProgramFlowTests
 
 namespace CoreTests
 
@@ -16,5 +17,6 @@ def allTests : List (String × IO Unit) :=
   ++ BuildersTests.allTests
   ++ SharedFlowTests.allTests
   ++ StateFlowTests.allTests
+  ++ ProgramFlowTests.allTests
 
 end CoreTests
