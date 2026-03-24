@@ -343,6 +343,39 @@ def testCombineFlushCascadesToParents : IO Unit := do
   flow1.close
   flow2.close
 
+def testFlushBeforeClose : IO Unit := do
+  let flow ← MutableSharedFlow.create (α := Nat)
+
+  let values ← IO.mkRef ([] : List Nat)
+  discard <| flow.subscribe fun v => do
+    values.modify (v :: ·)
+
+  flow.emit 1
+  flow.emit 2
+  flow.emit 3
+  flow.close
+
+  (← values.get) |> shouldEqual [3, 2, 1]
+
+def testFlushBeforeCloseDerivedFlow : IO Unit := do
+  let parent ← MutableSharedFlow.create (α := Nat)
+  let child ← Flows.map parent (· * 2)
+
+  let childValues ← IO.mkRef ([] : List Nat)
+  discard <| child.subscribe fun v => do
+    childValues.modify (v :: ·)
+
+  parent.emit 5
+  parent.emit 10
+  parent.close
+
+  (← childValues.get) |> shouldEqual [20, 10]
+
+  let parentClosed ← parent.isClosed
+  let childClosed ← child.isClosed
+  parentClosed |> shouldEqual true
+  childClosed |> shouldEqual true
+
 def allTests : List (String × IO Unit) := [
     ("SharedFlow: multiple consumers and cancellation", testMultipleConsumersAndCancellation),
     ("SharedFlow: replay buffer for new subscribers", testReplayBufferForNewSubscribers),
@@ -359,7 +392,9 @@ def allTests : List (String × IO Unit) := [
     ("SharedFlow: recursive cascading flush", testRecursiveCascadingFlush),
     ("SharedFlow: combine receives from both parents", testCombineReceivesFromBothParents),
     ("SharedFlow: combine close cascades from parent", testCombineCloseCascadesFromParent),
-    ("SharedFlow: combine flush cascades to parents", testCombineFlushCascadesToParents)
+    ("SharedFlow: combine flush cascades to parents", testCombineFlushCascadesToParents),
+    ("SharedFlow: flush before close", testFlushBeforeClose),
+    ("SharedFlow: flush before close derived flow", testFlushBeforeCloseDerivedFlow)
   ]
 
 end SharedFlowTests
