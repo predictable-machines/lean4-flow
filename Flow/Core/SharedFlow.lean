@@ -314,7 +314,11 @@ def emitAll (flow : MutableSharedFlow α) (values : List α) : IO Unit := do
     flow.emit value
 
 /-- Close the flow, cancelling all subscribers and preventing new emissions and subscriptions.
-    Also cancels any child flows created via map/filter/filterMap. -/
+    Also cancels any child flows created via map/filter/filterMap.
+
+    **Known limitation:** Under concurrent access, emitters may enqueue new values between
+    the flush and the `isClosed` mutation. Those values will not be flushed before channels
+    are closed. -/
 def close (flow : MutableSharedFlow α) : IO Unit := do
   flow.flush
   let actions ← flow.state.atomically do
