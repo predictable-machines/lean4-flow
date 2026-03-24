@@ -371,6 +371,11 @@ def testFlushBeforeCloseDerivedFlow : IO Unit := do
 
   (← childValues.get) |> shouldEqual [20, 10]
 
+  let parentClosed ← parent.isClosed
+  let childClosed ← child.isClosed
+  parentClosed |> shouldEqual true
+  childClosed |> shouldEqual true
+
 def allTests : List (String × IO Unit) := [
     ("SharedFlow: multiple consumers and cancellation", testMultipleConsumersAndCancellation),
     ("SharedFlow: replay buffer for new subscribers", testReplayBufferForNewSubscribers),
