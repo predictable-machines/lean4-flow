@@ -2,7 +2,7 @@ import Lake
 open Lake DSL
 
 package flow where
-  version := v!"0.3.2"
+  version := v!"0.3.3"
 
 @[default_target]
 lean_lib Flow where
